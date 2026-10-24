@@ -1,0 +1,305 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VoxelCity 3D - Cities Skylines Edition</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+  </head>
+  <body>
+    <!-- 3D Canvas Container -->
+    <div id="canvas-container"></div>
+
+    <!-- UI Overlay (Full Cities: Skylines 2 Glassmorphic HUD) -->
+    <div id="ui-overlay">
+      <!-- Top Bar: City Stats & Status -->
+      <header id="top-bar">
+        <div class="city-brand">
+          <div class="brand-badge">CS2 VOXEL</div>
+          <span class="city-title">MetroBlocks</span>
+        </div>
+
+        <div class="stats-group">
+          <!-- Treasury & Net Flow -->
+          <div class="stat-pill" title="City Treasury & Daily Net Flow">
+            <span class="stat-icon">💰</span>
+            <div class="pill-col">
+              <span class="stat-val" id="stat-money">$50,000</span>
+              <span class="stat-sub flow-pos" id="stat-flow">+$120/day</span>
+            </div>
+          </div>
+
+          <!-- Citizens & Happiness -->
+          <div class="stat-pill" title="Population & Citizen Happiness">
+            <span class="stat-icon">👥</span>
+            <div class="pill-col">
+              <span class="stat-val" id="stat-pop">0</span>
+              <span class="stat-sub happy-sub" id="stat-happy">85%</span>
+            </div>
+          </div>
+
+          <!-- Power Grid Capacity -->
+          <div class="stat-pill" title="Power Grid Demand / Capacity">
+            <span class="stat-icon">⚡</span>
+            <span class="stat-val" id="stat-power">0/40 MW</span>
+          </div>
+
+          <!-- Water Supply Grid -->
+          <div class="stat-pill" title="Water Supply Demand / Capacity">
+            <span class="stat-icon">💧</span>
+            <span class="stat-val" id="stat-water">0/60 m³</span>
+          </div>
+
+          <!-- Clock & Day -->
+          <div class="stat-pill" title="Simulation Time & Day">
+            <span class="stat-icon">🕒</span>
+            <div class="pill-col">
+              <span class="stat-val" id="stat-clock">12:00</span>
+              <span class="stat-sub" id="stat-day">Day 1</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- RCI Demand Bars (SimCity / CS2 style) -->
+        <div class="demand-meter" title="RCI Zoning Demand (Residential / Commercial / Industrial)">
+          <div class="demand-col">
+            <div class="demand-bar bar-res" id="bar-res" style="height: 60%"></div>
+            <span class="demand-lbl">R</span>
+          </div>
+          <div class="demand-col">
+            <div class="demand-bar bar-com" id="bar-com" style="height: 40%"></div>
+            <span class="demand-lbl">C</span>
+          </div>
+          <div class="demand-col">
+            <div class="demand-bar bar-ind" id="bar-ind" style="height: 30%"></div>
+            <span class="demand-lbl">I</span>
+          </div>
+        </div>
+
+        <!-- Simulation Speed Controls -->
+        <div class="speed-controls">
+          <button class="speed-btn" data-speed="0" title="Pause">⏸</button>
+          <button class="speed-btn active" data-speed="1" title="1x Speed">▶</button>
+          <button class="speed-btn" data-speed="2" title="2x Speed">▶▶</button>
+          <button class="speed-btn" data-speed="3" title="3x Fast Forward">▶▶▶</button>
+        </div>
+
+        <!-- Predefined City Plans Dropdown Selector -->
+        <div class="plan-selector" title="Predefined Starter City Layouts">
+          <span class="plan-label">PLANS:</span>
+          <button class="plan-pill-btn active" data-plan-id="clear" title="Plain untouched terrain">🌱 Blank</button>
+          <button class="plan-pill-btn" data-plan-id="curved_boulevard" title="Scenic curved loops, circular ring avenues & emerald coast">🔄 Curved Bay</button>
+          <button class="plan-pill-btn" data-plan-id="suburban_garden" title="Tree-lined neighborhood with central park & crescent loops">🏡 Garden City</button>
+          <button class="plan-pill-btn" data-plan-id="metro_expressway" title="Elevated highway overpass with high-rise downtown">🌉 Metropolis</button>
+          <button class="plan-pill-btn" data-plan-id="river_valley" title="Industrial port & clean tech residential district">🏭 Tech Port</button>
+        </div>
+
+        <!-- Biome / Area Terrain Selector -->
+        <div class="biome-selector" title="Choose Area / Biome Terrain">
+          <span class="biome-label">AREA:</span>
+          <button class="biome-pill-btn active" data-biome="valley" title="Lush Green Valley with meandering river & shoreline">🌿 Valley</button>
+          <button class="biome-pill-btn" data-biome="mountains" title="Highland Peaks, stone cliffs & alpine crater lake">⛰️ Mountains</button>
+          <button class="biome-pill-btn" data-biome="desert" title="Golden sand dunes, sandstone canyons & desert oasis">🏜️ Desert</button>
+          <button class="biome-pill-btn" data-biome="coastal" title="Tropical archipelago with sandy beaches & ocean bay">🏝️ Coastal</button>
+          <button class="biome-pill-btn" data-biome="plains" title="Open flat grassland with pond, perfect for megacities">🌾 Plains</button>
+        </div>
+
+        <!-- Pocket City Free Roam Drive Mode Button -->
+        <button id="btn-drive-mode" class="drive-mode-launch-btn" title="Explore your city from street level in Drive Mode! (Shortcut: T)">
+          <span class="drive-icon">🚗</span>
+          <span class="drive-text">Drive Mode</span>
+          <span class="drive-badge-key">T</span>
+        </button>
+      </header>
+
+      <!-- CS2 Infoviews Overlay Filter Bar (Right-side Pills) -->
+      <div id="infoview-dock">
+        <span class="infoview-label">INFOVIEWS</span>
+        <button class="overlay-btn" data-overlay="power" title="Electricity Grid Overlay">⚡ Power</button>
+        <button class="overlay-btn" data-overlay="water" title="Water Pipes Overlay">💧 Water</button>
+        <button class="overlay-btn" data-overlay="services" title="Public Safety & Health Coverage">🛡️ Services</button>
+        <button class="overlay-btn" data-overlay="happiness" title="Citizen Happiness Heatmap">😊 Happiness</button>
+      </div>
+
+      <!-- Road Type Submenu Dock -->
+      <div id="road-submenu" class="road-submenu visible">
+        <span class="submenu-label">ROADS</span>
+        <button class="road-type-btn" data-road-type="dirt" title="Dirt Trail ($5, slow, unpaved)">
+          <span class="road-icon">🪵</span>
+          <span class="road-title">Dirt</span>
+          <span class="road-cost">$5</span>
+        </button>
+        <button class="road-type-btn active" data-road-type="suburban" title="Suburban Street with Trees ($15)">
+          <span class="road-icon">🌳</span>
+          <span class="road-title">Suburban</span>
+          <span class="road-cost">$15</span>
+        </button>
+        <button class="road-type-btn" data-road-type="avenue" title="4-Lane Avenue with Streetlights ($30)">
+          <span class="road-icon">🚦</span>
+          <span class="road-title">Avenue</span>
+          <span class="road-cost">$30</span>
+        </button>
+        <button class="road-type-btn" data-road-type="highway" title="Elevated Highway on Concrete Pylons ($50)">
+          <span class="road-icon">🌉</span>
+          <span class="road-title">Highway</span>
+          <span class="road-cost">$50</span>
+        </button>
+      </div>
+
+      <!-- Service Buildings Submenu Dock -->
+      <div id="service-submenu" class="service-submenu">
+        <span class="submenu-label">SERVICES</span>
+        <button class="service-type-btn active" data-service-type="power_wind" title="Wind Turbine ($150, 40MW clean power)">
+          <span class="road-icon">💨</span>
+          <span class="road-title">Wind Turbine</span>
+          <span class="road-cost">$150</span>
+        </button>
+        <button class="service-type-btn" data-service-type="power_coal" title="Coal Plant ($500, 180MW, smog pollution)">
+          <span class="road-icon">🏭</span>
+          <span class="road-title">Coal Plant</span>
+          <span class="road-cost">$500</span>
+        </button>
+        <button class="service-type-btn" data-service-type="power_solar" title="Solar Farm ($320, 85MW, 0 pollution)">
+          <span class="road-icon">☀️</span>
+          <span class="road-title">Solar Farm</span>
+          <span class="road-cost">$320</span>
+        </button>
+        <button class="service-type-btn" data-service-type="power_gas" title="Gas Plant ($450, 160MW, low emissions)">
+          <span class="road-icon">🔥</span>
+          <span class="road-title">Gas Plant</span>
+          <span class="road-cost">$450</span>
+        </button>
+        <button class="service-type-btn" data-service-type="power_nuclear" title="Nuclear Plant ($1,400, 600MW, massive baseload)">
+          <span class="road-icon">⚛️</span>
+          <span class="road-title">Nuclear Plant</span>
+          <span class="road-cost">$1,400</span>
+        </button>
+        <button class="service-type-btn" data-service-type="power_fusion" title="Tokamak Fusion ($3,200, 1,800MW, limitless clean energy)">
+          <span class="road-icon">🌌</span>
+          <span class="road-title">Fusion Plant</span>
+          <span class="road-cost">$3,200</span>
+        </button>
+        <button class="service-type-btn" data-service-type="water_tower" title="Water Tower ($120, 60m³ clean water)">
+          <span class="road-icon">💧</span>
+          <span class="road-title">Water Tower</span>
+          <span class="road-cost">$120</span>
+        </button>
+        <button class="service-type-btn" data-service-type="water_tank" title="Water Reservoir Tank ($180, 120m³ high-capacity storage)">
+          <span class="road-icon">🚰</span>
+          <span class="road-title">Water Tank</span>
+          <span class="road-cost">$180</span>
+        </button>
+        <button class="service-type-btn" data-service-type="police_station" title="Police Precinct ($250, stops crime)">
+          <span class="road-icon">👮</span>
+          <span class="road-title">Police</span>
+          <span class="road-cost">$250</span>
+        </button>
+        <button class="service-type-btn" data-service-type="fire_station" title="Fire Station ($250, emergency response)">
+          <span class="road-icon">🚒</span>
+          <span class="road-title">Fire Station</span>
+          <span class="road-cost">$250</span>
+        </button>
+        <button class="service-type-btn" data-service-type="hospital" title="Clinic / Hospital ($350, healthcare)">
+          <span class="road-icon">🏥</span>
+          <span class="road-title">Hospital</span>
+          <span class="road-cost">$350</span>
+        </button>
+        <button class="service-type-btn" data-service-type="park" title="Urban Park ($80, leisure & happiness)">
+          <span class="road-icon">🌲</span>
+          <span class="road-title">Park</span>
+          <span class="road-cost">$80</span>
+        </button>
+      </div>
+
+      <!-- Bottom Main Construction Dock -->
+      <footer id="bottom-dock">
+        <div class="tool-palette">
+          <button class="tool-btn" data-tool="select" title="Inspect / Select (V)">
+            <span class="btn-icon">🔍</span>
+            <span class="btn-name">Inspect</span>
+          </button>
+
+          <button class="tool-btn active" data-tool="road" title="Road Construction (R)">
+            <span class="btn-icon">🛣️</span>
+            <span class="btn-name">Roads</span>
+          </button>
+
+          <div class="tool-divider"></div>
+
+          <button class="tool-btn zone-btn res" data-tool="residential" title="Residential Zone ($10) (1)">
+            <span class="btn-icon">🏡</span>
+            <span class="btn-name">Res</span>
+          </button>
+
+          <button class="tool-btn zone-btn com" data-tool="commercial" title="Commercial Zone ($10) (2)">
+            <span class="btn-icon">🏬</span>
+            <span class="btn-name">Com</span>
+          </button>
+
+          <button class="tool-btn zone-btn ind" data-tool="industrial" title="Industrial Zone ($10) (3)">
+            <span class="btn-icon">🏭</span>
+            <span class="btn-name">Ind</span>
+          </button>
+
+          <div class="tool-divider"></div>
+
+          <!-- Services Button -->
+          <button class="tool-btn service-btn" data-tool="service" title="Public Utilities & Services (S)">
+            <span class="btn-icon">⚡</span>
+            <span class="btn-name">Services</span>
+          </button>
+
+          <!-- Move / Relocate Button (CS2 Relocate) -->
+          <button class="tool-btn move-btn" data-tool="move" title="Relocate Service Building ($20) (M)">
+            <span class="btn-icon">📦</span>
+            <span class="btn-name">Move</span>
+          </button>
+
+          <div class="tool-divider"></div>
+
+          <!-- TheoTown Underground Utilities (Pipelines & Wires) -->
+          <button class="tool-btn pipe-btn" data-tool="pipe" title="Water Pipelines ($5) (P) - Show Coverage & Supply Buildings">
+            <span class="btn-icon">💧</span>
+            <span class="btn-name">Pipes</span>
+          </button>
+
+          <button class="tool-btn wire-btn" data-tool="wire" title="Underground Electric Wires ($5) (O) - Connect Grid to Buildings">
+            <span class="btn-icon">⚡</span>
+            <span class="btn-name">Wires</span>
+          </button>
+
+          <button class="tool-btn underground-btn" id="btn-toggle-underground" title="Toggle Underground / Subterranean X-Ray View (U)">
+            <span class="btn-icon">🕳️</span>
+            <span class="btn-name">Underground</span>
+          </button>
+
+          <div class="tool-divider"></div>
+
+          <!-- Tax Rate Adjuster Pill -->
+          <div class="tax-box" title="City Tax Rate">
+            <span class="tax-lbl">TAX</span>
+            <input type="range" id="tax-slider" min="4" max="20" value="9" />
+            <span id="tax-val" class="tax-val">9%</span>
+          </div>
+
+          <div class="tool-divider"></div>
+
+          <button class="tool-btn demo-btn" data-tool="demolish" title="Bulldoze / Demolish (X)">
+            <span class="btn-icon">🚜</span>
+            <span class="btn-name">Bulldoze</span>
+          </button>
+        </div>
+      </footer>
+
+      <!-- Floating Tooltip / Instructions -->
+      <div id="hint-box">
+        <span id="hint-text">💡 <b>Hold [Space] + Drag</b> to pan around (like Illustrator) | <b>Right-click</b> to orbit | <b>Scroll</b> to zoom</span>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
