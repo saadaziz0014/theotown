@@ -63,7 +63,11 @@ export class CityWorld {
   public baseTerrainHeights: Map<string, number> = new Map();
   public baseTerrainColors: Map<string, number> = new Map();
 
+  public sceneryGroup: THREE.Group = new THREE.Group();
+  public sceneryObjects: Map<string, THREE.Object3D> = new Map();
+
   public activeOverlay: ActiveOverlay = 'none';
+  public isRestoringSave: boolean = false;
   private animatedServiceParts: any[] = [];
   public streetLightsList: { mesh: THREE.Mesh; light?: THREE.PointLight }[] = [];
   public windowMeshesList: { mesh: THREE.Mesh; originalColor: number }[] = [];
@@ -125,6 +129,7 @@ export class CityWorld {
     this.scene.add(this.pedestriansGroup);
     this.scene.add(this.overlayGroup);
     this.scene.add(this.utilityPreviewGroup);
+    this.scene.add(this.sceneryGroup);
     this.initTerrain();
     this.initHighlight();
   }
@@ -135,7 +140,7 @@ export class CityWorld {
 
   private initTerrain() {
     const totalTiles = this.size * this.size;
-    const geometry = new THREE.BoxGeometry(1, 0.4, 1);
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshLambertMaterial({ vertexColors: false });
     this.groundMesh = new THREE.InstancedMesh(geometry, material, totalTiles);
     this.groundMesh.receiveShadow = true;
@@ -148,6 +153,7 @@ export class CityWorld {
   public generateBiome(biome: BiomeType = 'valley') {
     this.currentBiome = biome;
     this.clearAll();
+    this.clearScenery();
     this.baseTerrainTypes.clear();
     this.baseTerrainHeights.clear();
     this.baseTerrainColors.clear();
@@ -159,81 +165,137 @@ export class CityWorld {
       for (let z = -half; z < half; z++) {
         const key = this.getKey(x, z);
         let tileType: TileType = 'grass';
-        let yPos = -0.2;
+        let topY = 0.0;
         let colorVal = this.COLORS.grass;
 
         switch (biome) {
           case 'valley': {
-            // Winding scenic river flowing across the terrain with sandy shoreline
-            const riverZ = Math.sin(x * 0.18) * 4.2 + Math.cos(x * 0.08) * 1.8;
+            // Winding scenic river flowing along the southern waterfront with sandy shoreline
+            const riverZ = 7.5 + Math.sin(x * 0.22) * 2.2;
             const distToRiver = Math.abs(z - riverZ);
 
-            if (distToRiver <= 1.4) {
+            if (distToRiver <= 1.5) {
               tileType = 'water';
-              yPos = -0.27;
+              topY = -0.07;
               colorVal = (Math.sin(x * 0.5) > 0) ? 0x2563eb : 0x3b82f6;
-            } else if (distToRiver <= 2.4) {
+            } else if (distToRiver <= 2.6) {
               tileType = 'sand';
-              yPos = -0.22;
+              topY = -0.02;
               colorVal = (Math.cos(x * 0.4) > 0) ? 0xd4b878 : 0xe5d08f;
             } else {
               tileType = 'grass';
-              yPos = -0.2 + (Math.sin(x * 0.3) + Math.cos(z * 0.3)) * 0.03;
+              topY = (Math.sin(x * 0.3) + Math.cos(z * 0.3)) * 0.02;
               colorVal = ((x + z) % 2 === 0) ? this.COLORS.grass : this.COLORS.grassDark;
             }
             break;
           }
 
           case 'mountains': {
-            // Rocky high ridges with central accessible mountain pass and alpine lake
-            const passDist = Math.abs(z - x * 0.4);
-            const rawH = (Math.sin(x * 0.22) * Math.cos(z * 0.22)) * 0.45 + Math.sin(x * 0.45 + z * 0.35) * 0.18;
-            const h = passDist < 3.8 ? Math.min(rawH, 0.04) : rawH;
+            // Central & Southwest Alpine Valley
+            const distValley = Math.hypot((x + 2) * 0.85, (z - 4) * 1.15);
+            // High mountain pass winding north
+            const passCenter = 4.0 + Math.sin(z * 0.3) * 1.5;
+            const isPass = z <= 0 && Math.abs(x - passCenter) < 2.2;
 
-            // Mountain alpine crater lake in one corner
-            const lakeDist = Math.hypot(x + 8, z - 7);
+            // Alpine Glacial Tarn Cirque Lake (Northwest)
+            const lakeDist = Math.hypot(x + 8, z + 9);
+            // Mountain stream tumbling down from the tarn
+            const isStream = x === -7 && z >= -7 && z <= -2;
 
-            if (lakeDist < 2.5) {
+            if (lakeDist < 2.2) {
               tileType = 'water';
-              yPos = -0.25;
-              colorVal = 0x0284c7;
-            } else if (h > 0.36) {
-              tileType = 'rock';
-              yPos = -0.2 + h;
-              colorVal = 0xf8fafc; // Snow peak
-            } else if (h > 0.14) {
-              tileType = 'rock';
-              yPos = -0.2 + h;
-              colorVal = (Math.sin(x * 0.6) > 0) ? 0x64748b : 0x475569; // Granite / slate
+              topY = 0.50; // High mountain glacial tarn nestled in granite cirque
+              colorVal = (Math.sin(x * 0.5) > 0) ? 0x0284c7 : 0x0ea5e9;
+            } else if (lakeDist < 2.9) {
+              tileType = 'sand';
+              topY = 0.58; // Pebble/gravel tarn beach
+              colorVal = 0x94a3b8;
+            } else if (isStream) {
+              tileType = 'water';
+              topY = (z <= -5 ? 0.35 : 0.0) - 0.07;
+              colorVal = 0x38bdf8;
             } else {
-              tileType = 'grass';
-              yPos = -0.2 + Math.max(0, h);
-              colorVal = (Math.sin(z * 0.5) > 0) ? 0x2d4f1c : 0x3e6b27; // Alpine pine meadow
+              // Mountain Massif Envelopes
+              const massifN = Math.max(0, (-z - 1.0) / 14) ** 0.85 * Math.max(0, 1.0 - (x - 3) / 12);
+              const massifE = Math.max(0, (x - 4.5) / 11) ** 0.9 * Math.max(0, 1.0 - (z - 12) / 10);
+              const massifS = Math.max(0, (z - 9) / 6) * Math.max(0, (-x - 2) / 13) * 0.7;
+              const baseEnvelope = Math.max(massifN, massifE, massifS);
+
+              // Multi-octave fractal ridge noise (arêtes and jagged crests)
+              const r1 = 1.0 - Math.abs(Math.sin(x * 0.28 + z * 0.20 + 0.8) * Math.cos(z * 0.25 - x * 0.16));
+              const r2 = 1.0 - Math.abs(Math.sin(x * 0.55 - z * 0.42 + 1.2) * Math.sin(z * 0.50 + x * 0.32));
+              const r3 = Math.sin(x * 0.9 + z * 0.75) * Math.cos(x * 0.75 - z * 0.9) * 0.35;
+
+              let rawH = baseEnvelope * ((r1 ** 1.8) * 1.75 + r2 * 0.85 + r3);
+
+              // Prominent Mountain Horn Summits
+              const distHorn = Math.hypot(x + 8, z + 12);
+              rawH += Math.max(0, 1.0 - distHorn / 4.8) ** 2 * 1.4;
+              const distSpire = Math.hypot(x - 12, z + 7);
+              rawH += Math.max(0, 1.0 - distSpire / 4.5) ** 2 * 1.2;
+
+              // Valley basin & pass protection for city construction
+              if (distValley < 5.8 || isPass) {
+                rawH = Math.min(rawH, isPass ? 0.35 : 0.15);
+              }
+
+              // Quantized discrete voxel tiers & geological strata
+              if (rawH < 0.28) {
+                // Tier 0: Valley floor (lush buildable meadows)
+                tileType = 'grass';
+                topY = 0.0;
+                colorVal = ((x + z) % 2 === 0) ? 0x3e6b27 : 0x2d4f1c;
+              } else if (rawH < 0.75) {
+                // Tier 1: Alpine foothills & spruce plateaus
+                tileType = 'grass';
+                topY = 0.40;
+                colorVal = ((x + z) % 2 === 0) ? 0x365314 : 0x3f6212;
+              } else if (rawH < 1.30) {
+                // Tier 2: Granite cliffs & rocky shelves
+                tileType = 'rock';
+                topY = 0.90;
+                colorVal = (Math.sin(x * 0.7 + z * 0.4) > 0) ? 0x64748b : 0x52525b;
+              } else if (rawH < 1.85) {
+                // Tier 3: High mountain crags & jagged slate
+                tileType = 'rock';
+                topY = 1.45;
+                colorVal = (Math.cos(x * 0.5 - z * 0.6) > 0) ? 0x475569 : 0x334155;
+              } else if (rawH < 2.35) {
+                // Tier 4: Sub-peak snowline & frosted granite
+                tileType = 'rock';
+                topY = 2.05;
+                colorVal = ((x + z) % 2 === 0) ? 0xe2e8f0 : 0xcfd8dc;
+              } else {
+                // Tier 5: Majestic summit snow peaks & horns
+                tileType = 'rock';
+                topY = (rawH > 2.65 ? 2.90 : 2.60);
+                colorVal = (rawH > 2.6) ? 0xffffff : 0xf8fafc;
+              }
             }
             break;
           }
 
           case 'desert': {
-            // Golden sand dunes, sandstone canyon cliffs and central emerald oasis
-            const oasisDist = Math.hypot(x - 1, z + 2);
-            const isCanyonMesa = (x > 7 && z > 6) || (x < -8 && z < -7);
-            const dune = Math.sin(x * 0.35 + z * 0.15) * 0.05 + Math.cos(z * 0.4) * 0.04;
+            // Golden sand dunes, sandstone canyon cliffs and emerald oasis
+            const oasisDist = Math.hypot(x - 10, z + 10);
+            const isCanyonMesa = (x > 11 && z > 10) || (x < -12 && z < -11);
+            const dune = Math.sin(x * 0.35 + z * 0.15) * 0.03 + Math.cos(z * 0.4) * 0.02;
 
-            if (oasisDist < 2.0) {
+            if (oasisDist < 2.2) {
               tileType = 'water';
-              yPos = -0.26;
+              topY = -0.06;
               colorVal = 0x06b6d4; // Turquoise oasis spring
             } else if (oasisDist < 3.6) {
               tileType = 'grass';
-              yPos = -0.21;
+              topY = -0.01;
               colorVal = 0x15803d; // Oasis palm greenery
             } else if (isCanyonMesa) {
               tileType = 'rock';
-              yPos = -0.2 + 0.24;
+              topY = 0.55;
               colorVal = ((x + z) % 2 === 0) ? 0xb45309 : 0x9a3412; // Terraced red sandstone
             } else {
               tileType = 'sand';
-              yPos = -0.2 + dune;
+              topY = dune;
               const sandPalette = [0xf59e0b, 0xeab308, 0xd97706, 0xfde047];
               colorVal = sandPalette[Math.abs(x + z * 3) % sandPalette.length];
             }
@@ -242,22 +304,22 @@ export class CityWorld {
 
           case 'coastal': {
             // Central tropical island surrounded by ocean waters & sandy beaches
-            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.35) * 2.2 + Math.cos(z * 0.35) * 2.2;
-            if (islandRadius > 10.5) {
+            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.35) * 1.5 + Math.cos(z * 0.35) * 1.5;
+            if (islandRadius > 14.5) {
               tileType = 'water';
-              yPos = -0.28;
+              topY = -0.08;
               colorVal = 0x0284c7; // Deep ocean
-            } else if (islandRadius > 8.5) {
+            } else if (islandRadius > 13.0) {
               tileType = 'water';
-              yPos = -0.25;
+              topY = -0.05;
               colorVal = 0x38bdf8; // Shallow coastal waters
-            } else if (islandRadius > 7.0) {
+            } else if (islandRadius > 11.2) {
               tileType = 'sand';
-              yPos = -0.21;
+              topY = -0.01;
               colorVal = ((x + z) % 2 === 0) ? 0xfef08a : 0xfde047; // Beach
             } else {
               tileType = 'grass';
-              yPos = -0.2;
+              topY = 0.0;
               colorVal = ((x + z) % 2 === 0) ? 0x22c55e : 0x16a34a; // Tropical island interior
             }
             break;
@@ -265,19 +327,19 @@ export class CityWorld {
 
           case 'plains':
           default: {
-            // Wide open fertile flatlands with scenic pond, ideal for sprawling cities
-            const pondDist = Math.hypot(x + 6, z - 6);
-            if (pondDist < 2.5) {
+            // Wide open fertile flatlands with corner pond, ideal for sprawling cities
+            const pondDist = Math.hypot(x - 11, z + 11);
+            if (pondDist < 2.8) {
               tileType = 'water';
-              yPos = -0.26;
+              topY = -0.06;
               colorVal = 0x3b82f6;
-            } else if (pondDist < 3.4) {
+            } else if (pondDist < 3.8) {
               tileType = 'sand';
-              yPos = -0.22;
+              topY = -0.02;
               colorVal = 0xd4b878;
             } else {
               tileType = 'grass';
-              yPos = -0.2;
+              topY = 0.0;
               colorVal = ((x + z) % 2 === 0) ? 0x65a30d : 0x4d7c0f;
             }
             break;
@@ -285,19 +347,50 @@ export class CityWorld {
         }
 
         this.baseTerrainTypes.set(key, tileType);
-        this.baseTerrainHeights.set(key, yPos);
+        this.baseTerrainHeights.set(key, topY);
         this.baseTerrainColors.set(key, colorVal);
         this.tiles.set(key, tileType);
 
-        // Update ground mesh instance matrix and color
-        this.dummy.position.set(x + 0.5, yPos, z + 0.5);
-        this.dummy.scale.set(0.98, 1, 0.98);
-        this.dummy.updateMatrix();
-        this.groundMesh.setMatrixAt(index, this.dummy.matrix);
-
-        const color = new THREE.Color(colorVal);
-        this.groundMesh.setColorAt(index, color);
+        // Update ground mesh instance matrix and color with solid anchored bedrock
+        this.setGroundTileTransform(x, z, topY, colorVal);
         index++;
+
+        // Add procedural 3D scenery (trees & boulders) for mountain biome
+        if (biome === 'mountains' && tileType !== 'water') {
+          const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+          if (tileType === 'grass' && topY <= 0.40) {
+            // Foothills & valley pine trees
+            if (hash < 0.16) {
+              const tree = this.buildVoxelPineTree(false);
+              tree.position.set(x + 0.5, topY, z + 0.5);
+              this.sceneryGroup.add(tree);
+              this.sceneryObjects.set(key, tree);
+            }
+          } else if (tileType === 'rock' && topY >= 0.85 && topY <= 1.05) {
+            // Tier 2 granite shelves
+            if (hash < 0.14) {
+              if (hash < 0.07) {
+                const tree = this.buildVoxelPineTree(true); // Snow-dusted pine
+                tree.position.set(x + 0.5, topY, z + 0.5);
+                this.sceneryGroup.add(tree);
+                this.sceneryObjects.set(key, tree);
+              } else {
+                const rock = this.buildVoxelBoulder(Math.floor(hash * 10));
+                rock.position.set(x + 0.5, topY, z + 0.5);
+                this.sceneryGroup.add(rock);
+                this.sceneryObjects.set(key, rock);
+              }
+            }
+          } else if (tileType === 'rock' && topY >= 1.35 && topY <= 1.65) {
+            // Tier 3 high crags
+            if (hash < 0.12) {
+              const rock = this.buildVoxelBoulder(Math.floor(hash * 10));
+              rock.position.set(x + 0.5, topY, z + 0.5);
+              this.sceneryGroup.add(rock);
+              this.sceneryObjects.set(key, rock);
+            }
+          }
+        }
       }
     }
 
@@ -332,6 +425,9 @@ export class CityWorld {
     tool: string = 'road', 
     explicitRoadType?: RoadType
   ) {
+    const key = this.getKey(x, z);
+    const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+
     if (tool === 'road') {
       this.highlightMesh.visible = false;
       this.utilityPreviewGroup.visible = false;
@@ -346,8 +442,19 @@ export class CityWorld {
       const west = this.roads.get(this.getKey(x - 1, z));
 
       // Auto-detect matching road type if user hasn't explicitly overridden
-      const autoType = north?.type || south?.type || east?.type || west?.type || 'suburban';
-      const effectiveType = explicitRoadType || autoType;
+      const isWater = this.isWaterTile(x, z);
+      let autoType: RoadType = 'suburban';
+      if (isWater) {
+        autoType = 'bridge';
+      } else {
+        const nonBridge = [north?.type, south?.type, east?.type, west?.type].find((t): t is RoadType => !!t && t !== 'bridge');
+        autoType = nonBridge || 'suburban';
+      }
+
+      let effectiveType: RoadType = explicitRoadType || autoType;
+      if (!isWater && effectiveType === 'bridge' && !explicitRoadType) {
+        effectiveType = 'suburban';
+      }
 
       let hasNorth = !!north;
       let hasSouth = !!south;
@@ -369,7 +476,7 @@ export class CityWorld {
         valid
       );
 
-      this.roadPreviewGroup.position.set(x + 0.5, 0, z + 0.5);
+      this.roadPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
       this.roadPreviewGroup.add(previewMesh);
       this.roadPreviewGroup.visible = true;
     } else if (tool === 'pipe' || tool === 'wire') {
@@ -379,12 +486,12 @@ export class CityWorld {
       this.utilityPreviewGroup.clear();
       const preview = VoxelUtilityBuilder.buildCursorCoveragePreview(tool, 4);
       this.utilityPreviewGroup.add(preview);
-      this.utilityPreviewGroup.position.set(x + 0.5, 0, z + 0.5);
+      this.utilityPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
       this.utilityPreviewGroup.visible = true;
     } else {
       this.roadPreviewGroup.visible = false;
       this.utilityPreviewGroup.visible = false;
-      this.highlightMesh.position.set(x + 0.5, 0.05, z + 0.5);
+      this.highlightMesh.position.set(x + 0.5, topY + 0.05, z + 0.5);
 
       let color = valid ? 0xffffff : 0xef4444;
       if (valid) {
@@ -410,11 +517,153 @@ export class CityWorld {
     return this.tiles.get(this.getKey(x, z)) || 'grass';
   }
 
+  public isWaterTile(x: number, z: number): boolean {
+    const key = this.getKey(x, z);
+    const baseType = this.baseTerrainTypes.get(key);
+    const tileType = this.tiles.get(key);
+    return baseType === 'water' || tileType === 'water';
+  }
+
+  public setGroundTileTransform(x: number, z: number, topY: number, colorVal?: number) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    const index = (x + half) * this.size + (z + half);
+    const bedrock = -0.6;
+    const height = Math.max(0.08, topY - bedrock);
+    const centerY = bedrock + height / 2;
+
+    this.dummy.position.set(x + 0.5, centerY, z + 0.5);
+    this.dummy.scale.set(0.98, height, 0.98);
+    this.dummy.updateMatrix();
+    this.groundMesh.setMatrixAt(index, this.dummy.matrix);
+    this.groundMesh.instanceMatrix.needsUpdate = true;
+
+    if (colorVal !== undefined) {
+      this.groundMesh.setColorAt(index, new THREE.Color(colorVal));
+      if (this.groundMesh.instanceColor) {
+        this.groundMesh.instanceColor.needsUpdate = true;
+      }
+    }
+  }
+
+  public setGroundTileFoundation(x: number, z: number, topY: number = 0.0) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    this.removeSceneryAt(x, z);
+    const effectiveTop = (topY <= 0.001) ? 0.0 : topY;
+    this.setGroundTileTransform(x, z, effectiveTop);
+  }
+
+  public restoreGroundTile(x: number, z: number) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    const key = this.getKey(x, z);
+    const topY = this.baseTerrainHeights.get(key) ?? 0.0;
+    const colorVal = this.baseTerrainColors.get(key) ?? this.COLORS.grass;
+    this.setGroundTileTransform(x, z, topY, colorVal);
+  }
+
+  public ensureLandTile(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+
+    this.removeSceneryAt(x, z);
+    this.baseTerrainTypes.set(key, 'grass');
+    this.baseTerrainHeights.set(key, 0.0);
+    const grassColor = ((x + z) % 2 === 0) ? this.COLORS.grass : this.COLORS.grassDark;
+    this.baseTerrainColors.set(key, grassColor);
+    if (this.tiles.get(key) === 'water' || this.tiles.get(key) === 'sand' || this.tiles.get(key) === 'rock') {
+      this.tiles.set(key, 'grass');
+    }
+
+    this.setGroundTileTransform(x, z, 0.0, grassColor);
+  }
+
+  public removeSceneryAt(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const obj = this.sceneryObjects.get(key);
+    if (obj) {
+      this.sceneryGroup.remove(obj);
+      obj.traverse((child: any) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+        }
+      });
+      this.sceneryObjects.delete(key);
+    }
+  }
+
+  public clearScenery() {
+    for (const obj of this.sceneryObjects.values()) {
+      this.sceneryGroup.remove(obj);
+      obj.traverse((child: any) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+        }
+      });
+    }
+    this.sceneryObjects.clear();
+  }
+
+  private buildVoxelPineTree(snowDusted: boolean = false): THREE.Group {
+    const group = new THREE.Group();
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
+    const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.08), trunkMat);
+    trunk.position.y = 0.175;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const leafMat1 = new THREE.MeshLambertMaterial({ color: 0x14532d });
+    const skirt1 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.42), leafMat1);
+    skirt1.position.y = 0.28;
+    skirt1.castShadow = true;
+    group.add(skirt1);
+
+    const leafMat2 = new THREE.MeshLambertMaterial({ color: 0x166534 });
+    const skirt2 = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.20, 0.30), leafMat2);
+    skirt2.position.y = 0.44;
+    skirt2.castShadow = true;
+    group.add(skirt2);
+
+    const leafMat3 = new THREE.MeshLambertMaterial({ color: 0x15803d });
+    const skirt3 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.18), leafMat3);
+    skirt3.position.y = 0.58;
+    skirt3.castShadow = true;
+    group.add(skirt3);
+
+    if (snowDusted) {
+      const snowMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const snowCap = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.14), snowMat);
+      snowCap.position.y = 0.68;
+      group.add(snowCap);
+    }
+    return group;
+  }
+
+  private buildVoxelBoulder(type: number = 0): THREE.Group {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: (type % 2 === 0) ? 0x64748b : 0x52525b });
+    const rock1 = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.24), mat);
+    rock1.position.y = 0.10;
+    rock1.castShadow = true;
+    group.add(rock1);
+
+    const rock2 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.14, 0.16), mat);
+    rock2.position.set(0.10, 0.07, -0.08);
+    rock2.castShadow = true;
+    group.add(rock2);
+
+    group.rotation.y = type * 1.1;
+    return group;
+  }
+
   // --- ROAD PLACEMENT ---
   public placeRoad(x: number, z: number, roadType: RoadType = 'suburban', autoMatch: boolean = false): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
     const existingRoad = this.roads.get(key);
+    const isWater = this.isWaterTile(x, z);
 
     let effectiveType = roadType;
     if (autoMatch) {
@@ -426,9 +675,27 @@ export class CityWorld {
       ];
       for (const n of neighbors) {
         if (n && n.type) {
+          // If on land, never match a bridge neighbor!
+          if (!isWater && n.type === 'bridge') {
+            continue;
+          }
           effectiveType = n.type;
           break;
         }
+      }
+    }
+
+    // Water Crossing Rules: Only Bridges can traverse water, and Bridges can ONLY exist over water!
+    if (isWater) {
+      if (effectiveType !== 'bridge' && autoMatch) {
+        effectiveType = 'bridge';
+      } else if (effectiveType !== 'bridge') {
+        return false;
+      }
+    } else {
+      // Land tiles cannot have water bridges
+      if (effectiveType === 'bridge') {
+        effectiveType = (roadType !== 'bridge') ? roadType : 'suburban';
       }
     }
 
@@ -437,13 +704,16 @@ export class CityWorld {
     }
 
     const cost = ROAD_CONFIGS[effectiveType]?.cost || 20;
-    if (this.stats.money < cost) return false;
-    this.stats.money -= cost;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
     this.demolish(x, z, false);
 
     const config = ROAD_CONFIGS[effectiveType] || ROAD_CONFIGS.suburban;
     this.tiles.set(key, 'road');
+    if (!isWater) {
+      this.setGroundTileFoundation(x, z, 0.0);
+    }
     this.roads.set(key, {
       x,
       z,
@@ -460,6 +730,25 @@ export class CityWorld {
     this.createRoadVoxelMesh(x, z);
 
     return true;
+  }
+
+  public sanitizeBridgesOnLand(): number {
+    const toFix: { x: number; z: number }[] = [];
+    for (const r of this.roads.values()) {
+      if (r.type === 'bridge' && !this.isWaterTile(r.x, r.z)) {
+        toFix.push({ x: r.x, z: r.z });
+      }
+    }
+    if (toFix.length === 0) return 0;
+
+    const prevRestoring = this.isRestoringSave;
+    this.isRestoringSave = true;
+    for (const pos of toFix) {
+      this.demolish(pos.x, pos.z, false);
+      this.placeRoad(pos.x, pos.z, 'suburban', false);
+    }
+    this.isRestoringSave = prevRestoring;
+    return toFix.length;
   }
 
   private updateRoadConnections(x: number, z: number) {
@@ -515,13 +804,14 @@ export class CityWorld {
   public placeZone(x: number, z: number, zoneType: 'residential' | 'commercial' | 'industrial'): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
-    if (current === 'water' || current === 'road' || current?.startsWith('service_')) return false;
+    if (this.isWaterTile(x, z) || current === 'road' || current?.startsWith('service_')) return false;
 
-    if (this.stats.money < 10) return false;
-    this.stats.money -= 10;
+    if (!this.isRestoringSave && this.stats.money < 10) return false;
+    if (!this.isRestoringSave) this.stats.money -= 10;
 
     const tileZoneType: TileType = `zone_${zoneType}` as TileType;
     this.tiles.set(key, tileZoneType);
+    this.setGroundTileFoundation(x, z, 0.0);
 
     if (this.buildings.has(key)) {
       this.demolish(x, z, false);
@@ -563,18 +853,19 @@ export class CityWorld {
   public placeService(x: number, z: number, serviceType: ServiceType): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
-    if (current === 'water') return false;
+    if (this.isWaterTile(x, z) || current === 'road') return false;
 
     const def = SERVICE_DEFS[serviceType];
     if (!def) return false;
 
-    if (this.stats.money < def.cost) return false;
-    this.stats.money -= def.cost;
+    if (!this.isRestoringSave && this.stats.money < def.cost) return false;
+    if (!this.isRestoringSave) this.stats.money -= def.cost;
 
     this.demolish(x, z, false);
 
     const tileType: TileType = `service_${serviceType}` as TileType;
     this.tiles.set(key, tileType);
+    this.setGroundTileFoundation(x, z, 0.0);
 
     const service: PlacedService = {
       id: key,
@@ -647,12 +938,12 @@ export class CityWorld {
   public placePipe(x: number, z: number, cost: number = 5): boolean {
     const half = this.size / 2;
     if (x < -half || x >= half || z < -half || z >= half) return false;
-    if (this.stats.money < cost) return false;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
 
     const key = this.getKey(x, z);
     if (this.pipes.has(key)) return false;
 
-    this.stats.money -= cost;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
     const pipe: UtilityPipe = {
       x,
@@ -673,12 +964,12 @@ export class CityWorld {
   public placeWire(x: number, z: number, cost: number = 5): boolean {
     const half = this.size / 2;
     if (x < -half || x >= half || z < -half || z >= half) return false;
-    if (this.stats.money < cost) return false;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
 
     const key = this.getKey(x, z);
     if (this.wires.has(key)) return false;
 
-    this.stats.money -= cost;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
     const wire: UtilityWire = {
       x,
@@ -1156,6 +1447,7 @@ export class CityWorld {
     this.waterCoveredTiles.clear();
     this.powerCoveredTiles.clear();
     this.coverageGroup.clear();
+    this.clearScenery();
 
     this.streetLightsList = [];
     this.windowMeshesList = [];
@@ -1171,6 +1463,178 @@ export class CityWorld {
     }
 
     this.recalculateCityGrids();
+  }
+
+  // --- AUTOSAVE & STORAGE SYSTEM ---
+  public hasActiveCity(): boolean {
+    return this.roads.size > 0 || this.buildings.size > 0 || this.services.size > 0 || this.zoneMarkers.size > 0;
+  }
+
+  public saveCityToStorage(): boolean {
+    try {
+      const roadList: { x: number; z: number; type: RoadType }[] = [];
+      for (const r of this.roads.values()) {
+        roadList.push({ x: r.x, z: r.z, type: r.type });
+      }
+
+      const serviceList: { x: number; z: number; type: ServiceType }[] = [];
+      for (const s of this.services.values()) {
+        serviceList.push({ x: s.x, z: s.z, type: s.type });
+      }
+
+      const zoneList: { x: number; z: number; type: 'residential' | 'commercial' | 'industrial' }[] = [];
+      for (const [key] of this.zoneMarkers.entries()) {
+        const [xs, zs] = key.split(',');
+        const tileType = this.tiles.get(key);
+        if (tileType && tileType.startsWith('zone_')) {
+          const zType = tileType.replace('zone_', '') as 'residential' | 'commercial' | 'industrial';
+          zoneList.push({ x: parseInt(xs, 10), z: parseInt(zs, 10), type: zType });
+        }
+      }
+
+      const buildingList: any[] = [];
+      for (const b of this.buildings.values()) {
+        buildingList.push({
+          x: b.x,
+          z: b.z,
+          zoneType: b.zoneType,
+          height: b.height,
+          maxHeight: b.maxHeight,
+          level: b.level,
+          occupants: b.occupants,
+          color: b.color,
+          trimColor: b.trimColor
+        });
+      }
+
+      const pipeList: { x: number; z: number }[] = [];
+      for (const p of this.pipes.values()) {
+        pipeList.push({ x: p.x, z: p.z });
+      }
+
+      const wireList: { x: number; z: number }[] = [];
+      for (const w of this.wires.values()) {
+        wireList.push({ x: w.x, z: w.z });
+      }
+
+      const saveData = {
+        version: 1,
+        timestamp: Date.now(),
+        biome: this.currentBiome,
+        stats: { ...this.stats },
+        roads: roadList,
+        services: serviceList,
+        zones: zoneList,
+        buildings: buildingList,
+        pipes: pipeList,
+        wires: wireList
+      };
+
+      localStorage.setItem('theotown_3d_autosave', JSON.stringify(saveData));
+      return true;
+    } catch (err) {
+      console.warn('[Autosave] Failed to save city state to localStorage:', err);
+      return false;
+    }
+  }
+
+  public loadCityFromStorage(): boolean {
+    try {
+      const raw = localStorage.getItem('theotown_3d_autosave');
+      if (!raw) return false;
+
+      const data = JSON.parse(raw);
+      if (!data || !data.biome) return false;
+
+      this.isRestoringSave = true;
+      this.generateBiome(data.biome);
+
+      // Restore Roads
+      if (Array.isArray(data.roads)) {
+        for (const r of data.roads) {
+          this.placeRoad(r.x, r.z, r.type, false);
+        }
+      }
+      this.sanitizeBridgesOnLand();
+
+      // Restore Services
+      if (Array.isArray(data.services)) {
+        for (const s of data.services) {
+          this.placeService(s.x, s.z, s.type);
+        }
+      }
+
+      // Restore Pipes
+      if (Array.isArray(data.pipes)) {
+        for (const p of data.pipes) {
+          this.placePipe(p.x, p.z, 0);
+        }
+      }
+
+      // Restore Wires
+      if (Array.isArray(data.wires)) {
+        for (const w of data.wires) {
+          this.placeWire(w.x, w.z, 0);
+        }
+      }
+
+      // Restore Zones
+      if (Array.isArray(data.zones)) {
+        for (const z of data.zones) {
+          this.placeZone(z.x, z.z, z.type);
+        }
+      }
+
+      // Restore Buildings
+      if (Array.isArray(data.buildings)) {
+        for (const bData of data.buildings) {
+          const key = this.getKey(bData.x, bData.z);
+          const b: VoxelBuilding = {
+            id: key,
+            x: bData.x,
+            z: bData.z,
+            height: bData.height,
+            maxHeight: bData.maxHeight,
+            zoneType: bData.zoneType,
+            level: bData.level,
+            occupants: bData.occupants,
+            color: bData.color,
+            trimColor: bData.trimColor,
+            hasPower: true,
+            hasWater: true,
+            hasPolice: true,
+            hasFire: true,
+            hasHealth: true,
+            happiness: 80
+          };
+          this.buildings.set(key, b);
+          this.buildVoxelMesh(b);
+          const marker = this.zoneMarkers.get(key);
+          if (marker) marker.visible = false;
+        }
+      }
+
+      // Restore Stats
+      if (data.stats) {
+        this.stats = { ...this.stats, ...data.stats };
+      }
+
+      this.isRestoringSave = false;
+      this.recalculateCityGrids();
+      return true;
+    } catch (err) {
+      this.isRestoringSave = false;
+      console.warn('[Autosave] Failed to load city state from localStorage:', err);
+      return false;
+    }
+  }
+
+  public clearAutosave() {
+    try {
+      localStorage.removeItem('theotown_3d_autosave');
+    } catch (e) {
+      console.warn('Could not clear autosave:', e);
+    }
   }
 
   // --- DEMOLISH ---

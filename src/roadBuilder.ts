@@ -61,12 +61,31 @@ export const ROAD_CONFIGS: Record<string, RoadConfig> = {
     hasStreetLights: true,
     elevation: 0.35,
     description: 'High-speed elevated expressway with concrete pylons and guardrail lighting'
+  },
+  bridge: {
+    id: 'bridge',
+    name: 'Water Bridge',
+    cost: 45,
+    speedLimit: 1.4,
+    baseColor: 0x1e293b,
+    curbColor: 0x475569,
+    lineColor: 0xfacc15,
+    hasCurbs: true,
+    hasTrees: false,
+    hasGuardrails: true,
+    hasStreetLights: true,
+    elevation: 0.16,
+    description: 'Marine crossing bridge with concrete water piers, red suspension trusses & safety cable towers'
   }
 };
 
 export class VoxelRoadBuilder {
   private static poleMat = new THREE.MeshLambertMaterial({ color: 0x334155 });
   private static pillarMat = new THREE.MeshLambertMaterial({ color: 0x64748b });
+  private static pierMat = new THREE.MeshLambertMaterial({ color: 0x475569 });
+  private static bridgeTrussMat = new THREE.MeshLambertMaterial({ color: 0x991b1b });
+  private static cableMat = new THREE.MeshBasicMaterial({ color: 0xd4d4d8 });
+  private static beaconMat = new THREE.MeshBasicMaterial({ color: 0xf59e0b });
   private static treeTrunkMat = new THREE.MeshLambertMaterial({ color: 0x78350f });
   private static treeLeafMat = new THREE.MeshLambertMaterial({ color: 0x15803d });
 
@@ -75,12 +94,14 @@ export class VoxelRoadBuilder {
     const group = new THREE.Group();
     group.position.set(road.x + 0.5, 0, road.z + 0.5);
 
-    const isElevated = road.type === 'highway';
-    const deckY = isElevated ? 0.35 : 0.04;
-    const deckHeight = isElevated ? 0.12 : 0.08;
+    const isHighway = road.type === 'highway';
+    const isBridge = road.type === 'bridge';
+    const isElevated = isHighway || isBridge;
+    const deckY = isHighway ? 0.35 : (isBridge ? 0.16 : 0.04);
+    const deckHeight = isHighway ? 0.12 : (isBridge ? 0.10 : 0.08);
 
-    // 1. Concrete Pylons / Bridge Pillars for Elevated Highway
-    if (isElevated) {
+    // 1. Concrete Pylons / Bridge Pillars
+    if (isHighway) {
       const pillarGeo = new THREE.BoxGeometry(0.35, deckY, 0.35);
       const pillar = new THREE.Mesh(pillarGeo, this.pillarMat);
       pillar.position.set(0, deckY / 2, 0);
@@ -89,6 +110,19 @@ export class VoxelRoadBuilder {
 
       const crossheadGeo = new THREE.BoxGeometry(0.98, 0.08, 0.45);
       const crosshead = new THREE.Mesh(crossheadGeo, this.pillarMat);
+      crosshead.position.set(0, deckY - 0.04, 0);
+      group.add(crosshead);
+    } else if (isBridge) {
+      // Subterranean Marine Piers extending deep into water and riverbed
+      const pierHeight = deckY + 0.36; // Plunges down into water (to y = -0.36)
+      const pierGeo = new THREE.BoxGeometry(0.40, pierHeight, 0.40);
+      const pier = new THREE.Mesh(pierGeo, this.pierMat);
+      pier.position.set(0, deckY - pierHeight / 2, 0);
+      pier.castShadow = true;
+      group.add(pier);
+
+      const crossheadGeo = new THREE.BoxGeometry(0.98, 0.08, 0.50);
+      const crosshead = new THREE.Mesh(crossheadGeo, this.pierMat);
       crosshead.position.set(0, deckY - 0.04, 0);
       group.add(crosshead);
     }
@@ -126,6 +160,8 @@ export class VoxelRoadBuilder {
     const isCornerSE = (road.hasSouth && road.hasEast && !road.hasNorth && !road.hasWest);
     const isCornerSW = (road.hasSouth && road.hasWest && !road.hasNorth && !road.hasEast);
     const isCornerTurn = (isCornerNE || isCornerNW || isCornerSE || isCornerSW);
+    const isStraightNS = (road.hasNorth && road.hasSouth && !road.hasEast && !road.hasWest);
+    const isStraightEW = (!road.hasNorth && !road.hasSouth && road.hasEast && road.hasWest);
 
     if (config.hasCurbs) {
       if (!isCornerTurn) {
@@ -233,10 +269,10 @@ export class VoxelRoadBuilder {
       }
     }
 
-    // 5. Highway Steel Guardrails
+    // 5. Highway & Bridge Steel Guardrails
     if (config.hasGuardrails) {
-      const railMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
-      const railHeight = 0.14;
+      const railMat = isBridge ? this.bridgeTrussMat : new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+      const railHeight = isBridge ? 0.18 : 0.14;
       const railThickness = 0.05;
 
       if (!isCornerTurn) {
@@ -261,7 +297,7 @@ export class VoxelRoadBuilder {
           group.add(rail);
         }
       } else {
-        // Curved outer guardrail for elevated highway turns
+        // Curved outer guardrail for elevated highway & bridge turns
         let pivotX = isCornerNE || isCornerSE ? 0.5 : -0.5;
         let pivotZ = isCornerNE || isCornerNW ? -0.5 : 0.5;
         let startAngle = isCornerNE ? Math.PI / 2 : isCornerNW ? 0 : isCornerSE ? Math.PI : (3 * Math.PI) / 2;
@@ -280,11 +316,104 @@ export class VoxelRoadBuilder {
       }
     }
 
-    // 6. Lane Markings (Straight and Multi-Segment Smooth Curved Turn Arcs)
+    // 6. Bridge Suspension Towers & Stay Cables (On straight marine bridge spans)
+    if (isBridge && (isStraightNS || isStraightEW) && (road.x + road.z) % 3 === 0) {
+      const towerHeight = 0.70;
+      const towerWidth = 0.06;
+
+      if (isStraightNS) {
+        // Towers on East & West edges (x = -0.46 and x = 0.46)
+        const towerL = new THREE.Mesh(new THREE.BoxGeometry(towerWidth, towerHeight, towerWidth), this.bridgeTrussMat);
+        towerL.position.set(-0.46, deckY + towerHeight / 2, 0);
+        group.add(towerL);
+
+        const towerR = new THREE.Mesh(new THREE.BoxGeometry(towerWidth, towerHeight, towerWidth), this.bridgeTrussMat);
+        towerR.position.set(0.46, deckY + towerHeight / 2, 0);
+        group.add(towerR);
+
+        // Top Arch Crossbeam connecting towers
+        const arch = new THREE.Mesh(new THREE.BoxGeometry(0.98, 0.05, towerWidth), this.bridgeTrussMat);
+        arch.position.set(0, deckY + towerHeight, 0);
+        group.add(arch);
+
+        // Diagonal Stay Cables to deck ends
+        const cableGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.58);
+        const cable1 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable1.position.set(-0.46, deckY + towerHeight * 0.55, -0.24);
+        cable1.rotation.x = Math.PI / 6;
+        group.add(cable1);
+
+        const cable2 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable2.position.set(-0.46, deckY + towerHeight * 0.55, 0.24);
+        cable2.rotation.x = -Math.PI / 6;
+        group.add(cable2);
+
+        const cable3 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable3.position.set(0.46, deckY + towerHeight * 0.55, -0.24);
+        cable3.rotation.x = Math.PI / 6;
+        group.add(cable3);
+
+        const cable4 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable4.position.set(0.46, deckY + towerHeight * 0.55, 0.24);
+        cable4.rotation.x = -Math.PI / 6;
+        group.add(cable4);
+
+        // Amber Beacon light atop tower
+        const beaconL = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), this.beaconMat);
+        beaconL.position.set(-0.46, deckY + towerHeight + 0.03, 0);
+        group.add(beaconL);
+
+        const beaconR = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), this.beaconMat);
+        beaconR.position.set(0.46, deckY + towerHeight + 0.03, 0);
+        group.add(beaconR);
+      } else if (isStraightEW) {
+        // Towers on North & South edges (z = -0.46 and z = 0.46)
+        const towerN = new THREE.Mesh(new THREE.BoxGeometry(towerWidth, towerHeight, towerWidth), this.bridgeTrussMat);
+        towerN.position.set(0, deckY + towerHeight / 2, -0.46);
+        group.add(towerN);
+
+        const towerS = new THREE.Mesh(new THREE.BoxGeometry(towerWidth, towerHeight, towerWidth), this.bridgeTrussMat);
+        towerS.position.set(0, deckY + towerHeight / 2, 0.46);
+        group.add(towerS);
+
+        const arch = new THREE.Mesh(new THREE.BoxGeometry(towerWidth, 0.05, 0.98), this.bridgeTrussMat);
+        arch.position.set(0, deckY + towerHeight, 0);
+        group.add(arch);
+
+        const cableGeo = new THREE.CylinderGeometry(0.008, 0.008, 0.58);
+        const cable1 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable1.position.set(-0.24, deckY + towerHeight * 0.55, -0.46);
+        cable1.rotation.z = -Math.PI / 6;
+        group.add(cable1);
+
+        const cable2 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable2.position.set(0.24, deckY + towerHeight * 0.55, -0.46);
+        cable2.rotation.z = Math.PI / 6;
+        group.add(cable2);
+
+        const cable3 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable3.position.set(-0.24, deckY + towerHeight * 0.55, 0.46);
+        cable3.rotation.z = -Math.PI / 6;
+        group.add(cable3);
+
+        const cable4 = new THREE.Mesh(cableGeo, this.cableMat);
+        cable4.position.set(0.24, deckY + towerHeight * 0.55, 0.46);
+        cable4.rotation.z = Math.PI / 6;
+        group.add(cable4);
+
+        const beaconN = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), this.beaconMat);
+        beaconN.position.set(0, deckY + towerHeight + 0.03, -0.46);
+        group.add(beaconN);
+
+        const beaconS = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.04, 0.04), this.beaconMat);
+        beaconS.position.set(0, deckY + towerHeight + 0.03, 0.46);
+        group.add(beaconS);
+      }
+    }
+
+    // 7. Lane Markings (Straight and Multi-Segment Smooth Curved Turn Arcs)
     const lineMat = new THREE.MeshBasicMaterial({ color: config.lineColor });
     const isIntersection = (Number(road.hasNorth) + Number(road.hasSouth) + Number(road.hasEast) + Number(road.hasWest)) >= 3;
-    const isStraightNS = (road.hasNorth && road.hasSouth && !road.hasEast && !road.hasWest);
-    const isStraightEW = (!road.hasNorth && !road.hasSouth && road.hasEast && road.hasWest);
     const lineY = deckY + (deckHeight / 2) + 0.005;
 
     if (isCornerTurn) {
@@ -297,8 +426,8 @@ export class VoxelRoadBuilder {
       const arcGroup = new THREE.Group();
       const numSegs = 7;
 
-      if (road.type === 'avenue') {
-        // Double Yellow Curved Centerline for Arterial Avenue
+      if (road.type === 'avenue' || road.type === 'bridge') {
+        // Double Yellow Curved Centerline for Arterial Avenue & Bridge
         for (let i = 0; i < numSegs; i++) {
           const t = (i + 0.5) / numSegs;
           const theta = startAngle + t * (endAngle - startAngle);
@@ -333,7 +462,7 @@ export class VoxelRoadBuilder {
         }
       }
       group.add(arcGroup);
-    } else if (road.type === 'avenue') {
+    } else if (road.type === 'avenue' || road.type === 'bridge') {
       const whiteLineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
       if (isStraightNS) {
@@ -553,9 +682,10 @@ export class VoxelRoadBuilder {
     const config = ROAD_CONFIGS[type] || ROAD_CONFIGS.suburban;
     const group = new THREE.Group();
 
-    const isElevated = type === 'highway';
-    const deckY = isElevated ? 0.35 : 0.04;
-    const deckHeight = isElevated ? 0.12 : 0.08;
+    const isHighway = type === 'highway';
+    const isBridge = type === 'bridge';
+    const deckY = isHighway ? 0.35 : (isBridge ? 0.16 : 0.04);
+    const deckHeight = isHighway ? 0.12 : (isBridge ? 0.10 : 0.08);
 
     const baseColor = valid ? 0x38bdf8 : 0xef4444; // Cyan blueprint or Red invalid
     const mat = new THREE.MeshBasicMaterial({
@@ -573,7 +703,7 @@ export class VoxelRoadBuilder {
     });
 
     const lineMat = new THREE.MeshBasicMaterial({
-      color: valid ? (type === 'avenue' ? 0xfde047 : 0xffffff) : 0xfecaca,
+      color: valid ? (type === 'avenue' || type === 'bridge' ? 0xfde047 : 0xffffff) : 0xfecaca,
       transparent: true,
       opacity: valid ? 0.85 : 0.75,
       depthWrite: false
@@ -583,6 +713,18 @@ export class VoxelRoadBuilder {
     const baseMesh = new THREE.Mesh(new THREE.BoxGeometry(1.0, deckHeight, 1.0), mat);
     baseMesh.position.y = deckY;
     group.add(baseMesh);
+
+    // Support Pier Preview for Highway and Bridge
+    if (isHighway) {
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(0.35, deckY, 0.35), mat);
+      pier.position.set(0, deckY / 2, 0);
+      group.add(pier);
+    } else if (isBridge) {
+      const pierHeight = deckY + 0.36;
+      const pier = new THREE.Mesh(new THREE.BoxGeometry(0.38, pierHeight, 0.38), mat);
+      pier.position.set(0, deckY - pierHeight / 2, 0);
+      group.add(pier);
+    }
 
     // 2. Curbs on outer disconnected sides (width 0.12, matching exact road mesh)
     const fpHeight = 0.09;
@@ -624,7 +766,7 @@ export class VoxelRoadBuilder {
     const isStraightEW = (!hasNorth && !hasSouth && hasEast && hasWest) || (!hasNorth && !hasSouth && (hasEast || hasWest));
     const lineY = deckY + (deckHeight / 2) + 0.005;
 
-    if (type === 'avenue') {
+    if (type === 'avenue' || type === 'bridge') {
       if (isStraightNS || (!isStraightEW && !isCornerTurn)) {
         const l1 = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.01, 0.96), lineMat);
         l1.position.set(-0.04, lineY, 0);

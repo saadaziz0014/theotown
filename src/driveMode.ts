@@ -481,7 +481,8 @@ export class DriveModeController {
     const tileX = Math.floor(this.x);
     const tileZ = Math.floor(this.z);
     const road = this.world.roads.get(this.world.getKey(tileX, tileZ));
-    const targetY = road ? (road.elevation + 0.04) : 0.04;
+    const terrainTop = this.world.baseTerrainHeights.get(this.world.getKey(tileX, tileZ)) ?? 0.0;
+    const targetY = road ? (road.elevation + 0.04) : Math.max(0.04, terrainTop + 0.04);
     this.y += (targetY - this.y) * 0.2;
 
     // Tiny suspension bounce

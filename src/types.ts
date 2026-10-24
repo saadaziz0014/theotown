@@ -22,7 +22,7 @@ export type TileType =
 
 export type BiomeType = 'valley' | 'mountains' | 'desert' | 'coastal' | 'plains';
 
-export type RoadType = 'dirt' | 'suburban' | 'avenue' | 'highway';
+export type RoadType = 'dirt' | 'suburban' | 'avenue' | 'highway' | 'bridge';
 
 export interface RoadConfig {
   id: RoadType;

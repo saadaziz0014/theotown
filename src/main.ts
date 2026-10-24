@@ -33,6 +33,16 @@ class GameApp {
   private lastClickedTile = '';
   private lastTime: number = performance.now();
 
+  private confirmModalOverlay: HTMLElement | null = null;
+  private modalTitleEl: HTMLElement | null = null;
+  private modalWarningTextEl: HTMLElement | null = null;
+  private modalCancelBtn: HTMLElement | null = null;
+  private modalConfirmBtn: HTMLElement | null = null;
+  private pendingConfirmAction: (() => void) | null = null;
+
+  private autosaveToastTimer: any = null;
+  private autosaveDebounceTimer: any = null;
+
   constructor() {
     const container = document.getElementById('canvas-container')!;
 
@@ -78,6 +88,31 @@ class GameApp {
     // Start with a completely virgin, pristine green landscape without pre-built developments
     this.setupUI();
     this.setupInteractions();
+
+    // Check for existing saved city and restore
+    if (this.world.loadCityFromStorage()) {
+      this.world.sanitizeBridgesOnLand();
+      this.syncDropdownsToCurrentBiome();
+      this.updateUIStats();
+      this.updateDayNightCycle();
+      setTimeout(() => {
+        this.showAutosaveToast('Restored city progress from autosave');
+      }, 500);
+    }
+
+    // Window & Tab lifecycle autosave listeners
+    window.addEventListener('beforeunload', () => this.autosave(false));
+    window.addEventListener('pagehide', () => this.autosave(false));
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'hidden') this.autosave(false);
+    });
+
+    // Periodic autosave backup (every 45s)
+    setInterval(() => {
+      if (this.world && this.world.hasActiveCity()) {
+        this.autosave(true);
+      }
+    }, 45000);
 
     window.addEventListener('resize', () => this.onWindowResize());
     this.animate();
@@ -277,18 +312,77 @@ class GameApp {
       });
     });
 
+    // Custom Dropdown Controls (Plans & Biomes)
+    const planDropdownBtn = document.getElementById('btn-plan-dropdown');
+    const planDropdownMenu = document.getElementById('plan-dropdown-menu');
+    const planDropdownText = document.getElementById('plan-dropdown-text');
+    const planDropdownIcon = document.getElementById('plan-dropdown-icon');
+
+    const biomeDropdownBtn = document.getElementById('btn-biome-dropdown');
+    const biomeDropdownMenu = document.getElementById('biome-dropdown-menu');
+    const biomeDropdownText = document.getElementById('biome-dropdown-text');
+    const biomeDropdownIcon = document.getElementById('biome-dropdown-icon');
+
+    const closeAllDropdowns = () => {
+      planDropdownMenu?.classList.remove('open');
+      biomeDropdownMenu?.classList.remove('open');
+    };
+
+    planDropdownBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = planDropdownMenu?.classList.contains('open');
+      closeAllDropdowns();
+      if (!isOpen) planDropdownMenu?.classList.add('open');
+    });
+
+    biomeDropdownBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = biomeDropdownMenu?.classList.contains('open');
+      closeAllDropdowns();
+      if (!isOpen) biomeDropdownMenu?.classList.add('open');
+    });
+
+    window.addEventListener('click', () => {
+      closeAllDropdowns();
+    });
+
+    planDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
+    biomeDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
+
     // Predefined City Plans Loader
     const planButtons = document.querySelectorAll<HTMLButtonElement>('.plan-pill-btn');
     planButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const planId = btn.dataset.planId;
+        const planName = btn.dataset.name || 'Plan';
+        const planIcon = btn.dataset.icon || '🌱';
         const plan = CITY_PLANS.find(p => p.id === planId);
-        if (plan) {
+        if (!plan) return;
+
+        const executeLoadPlan = () => {
           planButtons.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
+          if (planDropdownText) planDropdownText.textContent = `Plans: ${planName}`;
+          if (planDropdownIcon) planDropdownIcon.textContent = planIcon;
+          closeAllDropdowns();
           plan.load(this.world);
+
+          this.syncDropdownsToCurrentBiome();
           this.updateUIStats();
           this.updateDayNightCycle();
+          this.autosave(false);
+          this.showAutosaveToast(`Loaded ${planName} blueprint`);
+        };
+
+        if (this.world.hasActiveCity()) {
+          closeAllDropdowns();
+          this.showConfirmModal(
+            'Load Blueprint & Reset City?',
+            `Loading the "${planName}" blueprint will replace your current city layout and regenerate the map. Your existing city progress will be reset.`,
+            executeLoadPlan
+          );
+        } else {
+          executeLoadPlan();
         }
       });
     });
@@ -298,12 +392,56 @@ class GameApp {
     biomeButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const biome = (btn.dataset.biome || 'valley') as BiomeType;
-        biomeButtons.forEach(b => b.classList.remove('active'));
-        btn.classList.add('active');
-        this.world.generateBiome(biome);
-        this.updateUIStats();
-        this.updateDayNightCycle();
+        const biomeName = btn.dataset.name || 'Biome';
+        const biomeIcon = btn.dataset.icon || '🌿';
+
+        const executeChangeBiome = () => {
+          biomeButtons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          if (biomeDropdownText) biomeDropdownText.textContent = `Area: ${biomeName}`;
+          if (biomeDropdownIcon) biomeDropdownIcon.textContent = biomeIcon;
+          closeAllDropdowns();
+          this.world.generateBiome(biome);
+          this.updateUIStats();
+          this.updateDayNightCycle();
+          this.autosave(false);
+          this.showAutosaveToast(`Terrain updated: ${biomeName} area`);
+        };
+
+        if (this.world.hasActiveCity()) {
+          closeAllDropdowns();
+          this.showConfirmModal(
+            'Regenerate Terrain & Reset City?',
+            `You have an active city with roads, buildings, and infrastructure. Changing the terrain to the ${biomeName} area will regenerate the landscape and wipe your existing city progress.`,
+            executeChangeBiome
+          );
+        } else {
+          executeChangeBiome();
+        }
       });
+    });
+
+    // Terrain Update Confirmation Modal controls
+    this.confirmModalOverlay = document.getElementById('confirm-modal-overlay');
+    this.modalTitleEl = document.getElementById('modal-title');
+    this.modalWarningTextEl = document.getElementById('modal-warning-text');
+    this.modalCancelBtn = document.getElementById('modal-cancel-btn');
+    this.modalConfirmBtn = document.getElementById('modal-confirm-btn');
+
+    this.modalCancelBtn?.addEventListener('click', () => {
+      this.hideConfirmModal();
+    });
+
+    this.modalConfirmBtn?.addEventListener('click', () => {
+      const action = this.pendingConfirmAction;
+      this.hideConfirmModal();
+      if (action) action();
+    });
+
+    this.confirmModalOverlay?.addEventListener('click', (e) => {
+      if (e.target === this.confirmModalOverlay) {
+        this.hideConfirmModal();
+      }
     });
 
     // Tax slider
@@ -343,6 +481,20 @@ class GameApp {
 
     // Keyboard Shortcuts
     window.addEventListener('keydown', (e) => {
+      // Modal dismissal and confirmation shortcuts
+      if (this.confirmModalOverlay?.classList.contains('active')) {
+        if (e.key === 'Escape') {
+          this.hideConfirmModal();
+          return;
+        }
+        if (e.key === 'Enter') {
+          const action = this.pendingConfirmAction;
+          this.hideConfirmModal();
+          if (action) action();
+          return;
+        }
+      }
+
       if (e.key === 't' || e.key === 'T') {
         if (!this.driveMode.isActive) {
           this.driveMode.enterDriveMode();
@@ -355,6 +507,10 @@ class GameApp {
       if (this.driveMode.isActive) return;
 
       if (e.key === 'r' || e.key === 'R') this.selectTool('road');
+      if (e.key === 'b' || e.key === 'B') {
+        const bridgeBtn = document.querySelector<HTMLButtonElement>('[data-road-type="bridge"]');
+        if (bridgeBtn) bridgeBtn.click();
+      }
       if (e.key === '1') this.selectTool('residential');
       if (e.key === '2') this.selectTool('commercial');
       if (e.key === '3') this.selectTool('industrial');
@@ -371,6 +527,68 @@ class GameApp {
     });
   }
 
+  private showAutosaveToast(msg?: string) {
+    const toast = document.getElementById('autosave-toast');
+    const toastText = document.getElementById('autosave-text');
+    if (!toast) return;
+    if (toastText && msg) toastText.textContent = msg;
+    toast.classList.add('show');
+    if (this.autosaveToastTimer) clearTimeout(this.autosaveToastTimer);
+    this.autosaveToastTimer = setTimeout(() => {
+      toast.classList.remove('show');
+    }, 2800);
+  }
+
+  public autosave(showToast: boolean = false) {
+    if (!this.world) return;
+    if (this.world.hasActiveCity()) {
+      const success = this.world.saveCityToStorage();
+      if (success && showToast) {
+        this.showAutosaveToast('City progress autosaved');
+      }
+    }
+  }
+
+  private scheduleAutosave() {
+    if (this.autosaveDebounceTimer) clearTimeout(this.autosaveDebounceTimer);
+    this.autosaveDebounceTimer = setTimeout(() => {
+      this.autosave(false);
+    }, 2200);
+  }
+
+  private showConfirmModal(title: string, warningText: string, onConfirm: () => void) {
+    if (!this.confirmModalOverlay) return;
+    this.pendingConfirmAction = onConfirm;
+    if (this.modalTitleEl) this.modalTitleEl.textContent = title;
+    if (this.modalWarningTextEl) this.modalWarningTextEl.textContent = warningText;
+    this.confirmModalOverlay.classList.add('active');
+  }
+
+  private hideConfirmModal() {
+    if (!this.confirmModalOverlay) return;
+    this.confirmModalOverlay.classList.remove('active');
+    this.pendingConfirmAction = null;
+  }
+
+  private syncDropdownsToCurrentBiome() {
+    const biomeNameMap: Record<string, { name: string; icon: string }> = {
+      valley: { name: 'Valley', icon: '🌿' },
+      mountains: { name: 'Mountains', icon: '⛰️' },
+      desert: { name: 'Desert', icon: '🏜️' },
+      coastal: { name: 'Coastal', icon: '🏝️' },
+      plains: { name: 'Plains', icon: '🌾' }
+    };
+    const bInfo = biomeNameMap[this.world.currentBiome] || biomeNameMap.valley;
+    const biomeDropdownText = document.getElementById('biome-dropdown-text');
+    const biomeDropdownIcon = document.getElementById('biome-dropdown-icon');
+    if (biomeDropdownText) biomeDropdownText.textContent = `Area: ${bInfo.name}`;
+    if (biomeDropdownIcon) biomeDropdownIcon.textContent = bInfo.icon;
+    const biomeButtons = document.querySelectorAll<HTMLButtonElement>('.biome-pill-btn');
+    biomeButtons.forEach(b => {
+      b.classList.toggle('active', b.dataset.biome === this.world.currentBiome);
+    });
+  }
+
   private selectTool(tool: string) {
     const btn = document.querySelector<HTMLButtonElement>(`[data-tool="${tool}"]`);
     if (btn) btn.click();
@@ -383,33 +601,55 @@ class GameApp {
     const clockEl = document.getElementById('stat-clock');
     const happyEl = document.getElementById('stat-happy');
     const powerEl = document.getElementById('stat-power');
+    const powerSubEl = document.getElementById('stat-power-sub');
     const waterEl = document.getElementById('stat-water');
+    const waterSubEl = document.getElementById('stat-water-sub');
     const flowEl = document.getElementById('stat-flow');
 
     if (moneyEl) moneyEl.textContent = `$${this.world.stats.money.toLocaleString()}`;
     if (popEl) popEl.textContent = this.world.stats.population.toLocaleString();
-    if (dayEl) dayEl.textContent = `Day ${this.world.stats.day}`;
 
-    // Format 24-hr clock (e.g. 14:30)
+    // Format 24-hr clock (e.g. 13:06)
     const hours = Math.floor(this.world.stats.timeOfDay);
     const mins = Math.floor((this.world.stats.timeOfDay % 1) * 60);
     if (clockEl) {
-      clockEl.textContent = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')} (${this.world.stats.timePhase})`;
+      clockEl.textContent = `${hours.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}`;
+    }
+    if (dayEl) {
+      dayEl.textContent = `Day ${this.world.stats.day} (${this.world.stats.timePhase})`;
     }
 
-    if (happyEl) happyEl.textContent = `${this.world.stats.happiness}%`;
+    if (happyEl) happyEl.textContent = `${this.world.stats.happiness}% Happy`;
+
     if (powerEl) {
-      powerEl.textContent = `${this.world.stats.powerDemand}/${this.world.stats.powerCapacity} MW (${this.world.stats.powerCoveredPct}% Grid)`;
+      powerEl.textContent = `${this.world.stats.powerDemand}/${this.world.stats.powerCapacity} MW`;
     }
+    if (powerSubEl) {
+      powerSubEl.textContent = `${this.world.stats.powerCoveredPct}% Grid`;
+      powerSubEl.className = `stat-sub ${this.world.stats.powerCoveredPct >= 80 ? 'flow-pos' : 'flow-neg'}`;
+    }
+
     if (waterEl) {
-      waterEl.textContent = `${this.world.stats.waterDemand}/${this.world.stats.waterCapacity} m³ (${this.world.stats.waterCoveredPct}% Pipes)`;
+      waterEl.textContent = `${this.world.stats.waterDemand}/${this.world.stats.waterCapacity} m³`;
+    }
+    if (waterSubEl) {
+      waterSubEl.textContent = `${this.world.stats.waterCoveredPct}% Pipes`;
+      waterSubEl.className = `stat-sub ${this.world.stats.waterCoveredPct >= 80 ? 'flow-pos' : 'flow-neg'}`;
     }
 
     if (flowEl) {
       const net = this.world.stats.income - this.world.stats.expenses;
       flowEl.textContent = `${net >= 0 ? '+' : ''}$${net}/day`;
-      flowEl.className = `stat-val ${net >= 0 ? 'flow-pos' : 'flow-neg'}`;
+      flowEl.className = `stat-sub ${net >= 0 ? 'flow-pos' : 'flow-neg'}`;
     }
+
+    // Dynamic RCI Demand meter
+    const barRes = document.getElementById('bar-res');
+    const barCom = document.getElementById('bar-com');
+    const barInd = document.getElementById('bar-ind');
+    if (barRes) barRes.style.height = `${Math.min(100, Math.max(12, this.world.stats.demandRes))}%`;
+    if (barCom) barCom.style.height = `${Math.min(100, Math.max(12, this.world.stats.demandCom))}%`;
+    if (barInd) barInd.style.height = `${Math.min(100, Math.max(12, this.world.stats.demandInd))}%`;
   }
 
   private setupInteractions() {
@@ -435,32 +675,21 @@ class GameApp {
         this.world.clearHighlight();
         return;
       }
-      this.mouse.x = (e.clientX / window.innerWidth) * 2 - 1;
-      this.mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+      const tile = this.getTileFromPointer(e.clientX, e.clientY);
+      if (tile) {
+        const { x: tileX, z: tileZ } = tile;
+        const isValid = this.isActionValid(tileX, tileZ);
+        const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+        this.world.setHighlight(tileX, tileZ, isValid, this.currentTool, explicitType);
 
-      this.raycaster.setFromCamera(this.mouse, this.camera);
-      const intersection = new THREE.Vector3();
-      const hits = this.raycaster.ray.intersectPlane(this.plane, intersection);
-
-      if (hits) {
-        const tileX = Math.floor(intersection.x);
-        const tileZ = Math.floor(intersection.z);
-
-        const half = this.world.size / 2;
-        if (tileX >= -half && tileX < half && tileZ >= -half && tileZ < half) {
-          const isValid = this.isActionValid();
-          const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
-          this.world.setHighlight(tileX, tileZ, isValid, this.currentTool, explicitType);
-
-          if (this.isMouseDown) {
-            const tileKey = `${tileX},${tileZ}`;
-            if (tileKey !== this.lastClickedTile) {
-              this.handleGridAction(e.clientX, e.clientY);
-            }
+        if (this.isMouseDown) {
+          const tileKey = `${tileX},${tileZ}`;
+          if (tileKey !== this.lastClickedTile) {
+            this.handleGridAction(e.clientX, e.clientY);
           }
-        } else {
-          this.world.clearHighlight();
         }
+      } else {
+        this.world.clearHighlight();
       }
     });
 
@@ -470,7 +699,61 @@ class GameApp {
     });
   }
 
-  private isActionValid(): boolean {
+  private getTileFromPointer(clientX: number, clientY: number): { x: number; z: number } | null {
+    this.mouse.x = (clientX / window.innerWidth) * 2 - 1;
+    this.mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    this.raycaster.setFromCamera(this.mouse, this.camera);
+
+    const half = this.world.size / 2;
+
+    // 1. Raycast against ground mesh instances (supports elevated mountain terraces)
+    const hits = this.raycaster.intersectObject(this.world.groundMesh);
+    if (hits.length > 0 && hits[0].instanceId !== undefined) {
+      const id = hits[0].instanceId;
+      const x = Math.floor(id / this.world.size) - half;
+      const z = (id % this.world.size) - half;
+      if (x >= -half && x < half && z >= -half && z < half) {
+        return { x, z };
+      }
+    }
+
+    // 2. Fallback to ground plane intersection
+    const intersection = new THREE.Vector3();
+    if (this.raycaster.ray.intersectPlane(this.plane, intersection)) {
+      const x = Math.floor(intersection.x);
+      const z = Math.floor(intersection.z);
+      if (x >= -half && x < half && z >= -half && z < half) {
+        return { x, z };
+      }
+    }
+
+    return null;
+  }
+
+  private isActionValid(tileX?: number, tileZ?: number): boolean {
+    if (tileX !== undefined && tileZ !== undefined) {
+      if (this.currentTool === 'road') {
+        const isWater = this.world.isWaterTile(tileX, tileZ);
+        if (isWater && this.selectedRoadType !== 'bridge' && this.userExplicitRoadType) {
+          return false;
+        }
+        if (!isWater && this.selectedRoadType === 'bridge' && this.userExplicitRoadType) {
+          return false;
+        }
+        const effectiveType = isWater ? 'bridge' : (this.selectedRoadType === 'bridge' ? 'suburban' : this.selectedRoadType);
+        const cost = ROAD_CONFIGS[effectiveType]?.cost || 20;
+        return this.world.stats.money >= cost;
+      }
+      if (this.currentTool === 'residential' || this.currentTool === 'commercial' || this.currentTool === 'industrial') {
+        if (this.world.isWaterTile(tileX, tileZ)) return false;
+        return this.world.stats.money >= 10;
+      }
+      if (this.currentTool === 'service') {
+        if (this.world.isWaterTile(tileX, tileZ)) return false;
+        const cost = SERVICE_DEFS[this.selectedServiceType]?.cost || 100;
+        return this.world.stats.money >= cost;
+      }
+    }
     if (this.currentTool === 'road') {
       const cost = ROAD_CONFIGS[this.selectedRoadType]?.cost || 20;
       return this.world.stats.money >= cost;
@@ -489,47 +772,70 @@ class GameApp {
   }
 
   private handleGridAction(clientX: number, clientY: number) {
-    this.mouse.x = (clientX / window.innerWidth) * 2 - 1;
-    this.mouse.y = -(clientY / window.innerHeight) * 2 + 1;
+    const tile = this.getTileFromPointer(clientX, clientY);
+    if (!tile) return;
 
-    this.raycaster.setFromCamera(this.mouse, this.camera);
-    const intersection = new THREE.Vector3();
-    const hits = this.raycaster.ray.intersectPlane(this.plane, intersection);
+    const { x: tileX, z: tileZ } = tile;
+    this.lastClickedTile = `${tileX},${tileZ}`;
 
-    if (hits) {
-      const tileX = Math.floor(intersection.x);
-      const tileZ = Math.floor(intersection.z);
-      this.lastClickedTile = `${tileX},${tileZ}`;
-
-      switch (this.currentTool) {
-        case 'road':
+    switch (this.currentTool) {
+        case 'road': {
+          const isWater = this.world.isWaterTile(tileX, tileZ);
+          if (isWater && this.selectedRoadType !== 'bridge' && this.userExplicitRoadType) {
+            const hintText = document.getElementById('hint-text');
+            if (hintText) {
+              hintText.innerHTML = `🌊 <b>Water Obstacle</b>: Regular roads cannot cross water! Select the <b>Bridge ($45)</b> tool (or press <b>B</b>) to span across water.`;
+            }
+            return;
+          }
+          if (!isWater && this.selectedRoadType === 'bridge' && this.userExplicitRoadType) {
+            const hintText = document.getElementById('hint-text');
+            if (hintText) {
+              hintText.innerHTML = `🌉 <b>Water Bridge</b>: Bridges can only be built over water! To continue or end the road on land, select <b>Suburban (R)</b>, <b>Avenue</b>, or <b>Highway</b>.`;
+            }
+            return;
+          }
           const autoMatch = !this.userExplicitRoadType;
-          this.world.placeRoad(tileX, tileZ, this.selectedRoadType, autoMatch);
+          let roadTypeToPlace = this.selectedRoadType;
+          if (isWater && autoMatch) {
+            roadTypeToPlace = 'bridge';
+          } else if (!isWater && roadTypeToPlace === 'bridge') {
+            roadTypeToPlace = 'suburban';
+          }
+          this.world.placeRoad(tileX, tileZ, roadTypeToPlace, autoMatch);
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
+        }
         case 'residential':
           this.world.placeZone(tileX, tileZ, 'residential');
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'commercial':
           this.world.placeZone(tileX, tileZ, 'commercial');
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'industrial':
           this.world.placeZone(tileX, tileZ, 'industrial');
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'service':
           this.world.placeService(tileX, tileZ, this.selectedServiceType);
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'pipe':
           this.world.placePipe(tileX, tileZ, 5);
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'wire':
           this.world.placeWire(tileX, tileZ, 5);
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
         case 'move':
           this.handleMoveAction(tileX, tileZ);
@@ -537,9 +843,9 @@ class GameApp {
         case 'demolish':
           this.world.demolish(tileX, tileZ);
           this.updateUIStats();
+          this.scheduleAutosave();
           break;
       }
-    }
   }
 
   private handleMoveAction(tileX: number, tileZ: number) {
@@ -573,6 +879,7 @@ class GameApp {
         }
         this.selectedServiceToMove = null;
         this.updateUIStats();
+        this.scheduleAutosave();
       } else {
         if (hintText) {
           hintText.innerHTML = `❌ Cannot place here. Must be an empty tile away from roads. Click again or pick another tile.`;

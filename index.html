@@ -2,7 +2,8 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="alternate icon" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>VoxelCity 3D - Cities Skylines Edition</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -17,102 +18,186 @@
     <div id="ui-overlay">
       <!-- Top Bar: City Stats & Status -->
       <header id="top-bar">
-        <div class="city-brand">
-          <div class="brand-badge">CS2 VOXEL</div>
-          <span class="city-title">MetroBlocks</span>
-        </div>
+        <div class="top-bar-left">
+          <div class="city-brand">
+            <div class="brand-badge">CS2 VOXEL</div>
+            <span class="city-title">MetroBlocks</span>
+          </div>
 
-        <div class="stats-group">
-          <!-- Treasury & Net Flow -->
-          <div class="stat-pill" title="City Treasury & Daily Net Flow">
-            <span class="stat-icon">💰</span>
-            <div class="pill-col">
-              <span class="stat-val" id="stat-money">$50,000</span>
-              <span class="stat-sub flow-pos" id="stat-flow">+$120/day</span>
+          <div class="stats-group">
+            <!-- Treasury & Net Flow -->
+            <div class="stat-pill" title="City Treasury & Daily Net Flow">
+              <span class="stat-icon">💰</span>
+              <div class="pill-col">
+                <span class="stat-val" id="stat-money">$50,000</span>
+                <span class="stat-sub flow-pos" id="stat-flow">+$0/day</span>
+              </div>
+            </div>
+
+            <!-- Citizens & Happiness -->
+            <div class="stat-pill" title="Population & Citizen Happiness">
+              <span class="stat-icon">👥</span>
+              <div class="pill-col">
+                <span class="stat-val" id="stat-pop">0</span>
+                <span class="stat-sub happy-sub" id="stat-happy">85% Happy</span>
+              </div>
+            </div>
+
+            <!-- Power Grid Capacity -->
+            <div class="stat-pill" title="Power Grid Demand / Capacity">
+              <span class="stat-icon">⚡</span>
+              <div class="pill-col">
+                <span class="stat-val" id="stat-power">0/0 MW</span>
+                <span class="stat-sub flow-pos" id="stat-power-sub">100% Grid</span>
+              </div>
+            </div>
+
+            <!-- Water Supply Grid -->
+            <div class="stat-pill" title="Water Supply Demand / Capacity">
+              <span class="stat-icon">💧</span>
+              <div class="pill-col">
+                <span class="stat-val" id="stat-water">0/0 m³</span>
+                <span class="stat-sub flow-pos" id="stat-water-sub">100% Pipes</span>
+              </div>
+            </div>
+
+            <!-- Clock & Day -->
+            <div class="stat-pill" title="Simulation Time & Day">
+              <span class="stat-icon">🕒</span>
+              <div class="pill-col">
+                <span class="stat-val" id="stat-clock">12:00</span>
+                <span class="stat-sub" id="stat-day">Day 1 (Noon)</span>
+              </div>
             </div>
           </div>
 
-          <!-- Citizens & Happiness -->
-          <div class="stat-pill" title="Population & Citizen Happiness">
-            <span class="stat-icon">👥</span>
-            <div class="pill-col">
-              <span class="stat-val" id="stat-pop">0</span>
-              <span class="stat-sub happy-sub" id="stat-happy">85%</span>
+          <!-- RCI Demand Bars (SimCity / CS2 style) -->
+          <div class="demand-meter" title="RCI Zoning Demand (Residential / Commercial / Industrial)">
+            <div class="demand-col">
+              <div class="demand-bar bar-res" id="bar-res" style="height: 60%"></div>
+              <span class="demand-lbl">R</span>
+            </div>
+            <div class="demand-col">
+              <div class="demand-bar bar-com" id="bar-com" style="height: 40%"></div>
+              <span class="demand-lbl">C</span>
+            </div>
+            <div class="demand-col">
+              <div class="demand-bar bar-ind" id="bar-ind" style="height: 30%"></div>
+              <span class="demand-lbl">I</span>
             </div>
           </div>
 
-          <!-- Power Grid Capacity -->
-          <div class="stat-pill" title="Power Grid Demand / Capacity">
-            <span class="stat-icon">⚡</span>
-            <span class="stat-val" id="stat-power">0/40 MW</span>
+          <!-- Simulation Speed Controls -->
+          <div class="speed-controls">
+            <button class="speed-btn" data-speed="0" title="Pause">⏸</button>
+            <button class="speed-btn active" data-speed="1" title="1x Speed">▶</button>
+            <button class="speed-btn" data-speed="2" title="2x Speed">▶▶</button>
+            <button class="speed-btn" data-speed="3" title="3x Fast Forward">▶▶▶</button>
           </div>
+        </div>
 
-          <!-- Water Supply Grid -->
-          <div class="stat-pill" title="Water Supply Demand / Capacity">
-            <span class="stat-icon">💧</span>
-            <span class="stat-val" id="stat-water">0/60 m³</span>
-          </div>
-
-          <!-- Clock & Day -->
-          <div class="stat-pill" title="Simulation Time & Day">
-            <span class="stat-icon">🕒</span>
-            <div class="pill-col">
-              <span class="stat-val" id="stat-clock">12:00</span>
-              <span class="stat-sub" id="stat-day">Day 1</span>
+        <div class="top-bar-right">
+          <!-- Predefined City Plans Dropdown Selector -->
+          <div class="custom-dropdown" id="plan-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-plan-dropdown" title="Predefined Starter City Layouts">
+              <span class="dropdown-icon" id="plan-dropdown-icon">🌱</span>
+              <span class="dropdown-text" id="plan-dropdown-text">Plans: Blank</span>
+              <span class="dropdown-chevron">▾</span>
+            </button>
+            <div class="dropdown-menu" id="plan-dropdown-menu">
+              <div class="dropdown-menu-header">STARTER BLUEPRINTS</div>
+              <button class="dropdown-item plan-pill-btn active" data-plan-id="clear" data-name="Blank" data-icon="🌱">
+                <span class="dropdown-item-icon">🌱</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Blank Canvas</span>
+                  <span class="dropdown-item-desc">Plain untouched virgin terrain</span>
+                </div>
+              </button>
+              <button class="dropdown-item plan-pill-btn" data-plan-id="curved_boulevard" data-name="Curved Bay" data-icon="🔄">
+                <span class="dropdown-item-icon">🔄</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Curved Bay</span>
+                  <span class="dropdown-item-desc">Scenic curved loops & emerald coast</span>
+                </div>
+              </button>
+              <button class="dropdown-item plan-pill-btn" data-plan-id="suburban_garden" data-name="Garden City" data-icon="🏡">
+                <span class="dropdown-item-icon">🏡</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Garden City</span>
+                  <span class="dropdown-item-desc">Tree-lined suburban crescent loops</span>
+                </div>
+              </button>
+              <button class="dropdown-item plan-pill-btn" data-plan-id="metro_expressway" data-name="Metropolis" data-icon="🌉">
+                <span class="dropdown-item-icon">🌉</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Metropolis</span>
+                  <span class="dropdown-item-desc">Elevated highway & downtown skyline</span>
+                </div>
+              </button>
+              <button class="dropdown-item plan-pill-btn" data-plan-id="river_valley" data-name="Tech Port" data-icon="🏭">
+                <span class="dropdown-item-icon">🏭</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Tech Port</span>
+                  <span class="dropdown-item-desc">Industrial harbor & clean tech district</span>
+                </div>
+              </button>
             </div>
           </div>
-        </div>
 
-        <!-- RCI Demand Bars (SimCity / CS2 style) -->
-        <div class="demand-meter" title="RCI Zoning Demand (Residential / Commercial / Industrial)">
-          <div class="demand-col">
-            <div class="demand-bar bar-res" id="bar-res" style="height: 60%"></div>
-            <span class="demand-lbl">R</span>
+          <!-- Biome / Area Terrain Selector -->
+          <div class="custom-dropdown" id="biome-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-biome-dropdown" title="Choose Area / Biome Terrain">
+              <span class="dropdown-icon" id="biome-dropdown-icon">🌿</span>
+              <span class="dropdown-text" id="biome-dropdown-text">Area: Valley</span>
+              <span class="dropdown-chevron">▾</span>
+            </button>
+            <div class="dropdown-menu" id="biome-dropdown-menu">
+              <div class="dropdown-menu-header">TERRAIN BIOMES</div>
+              <button class="dropdown-item biome-pill-btn active" data-biome="valley" data-name="Valley" data-icon="🌿">
+                <span class="dropdown-item-icon">🌿</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Valley</span>
+                  <span class="dropdown-item-desc">Lush rolling hills & winding river</span>
+                </div>
+              </button>
+              <button class="dropdown-item biome-pill-btn" data-biome="mountains" data-name="Mountains" data-icon="⛰️">
+                <span class="dropdown-item-icon">⛰️</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Mountains</span>
+                  <span class="dropdown-item-desc">Stone cliffs, pass & alpine crater lake</span>
+                </div>
+              </button>
+              <button class="dropdown-item biome-pill-btn" data-biome="desert" data-name="Desert" data-icon="🏜️">
+                <span class="dropdown-item-icon">🏜️</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Desert</span>
+                  <span class="dropdown-item-desc">Golden dunes, canyons & palm oasis</span>
+                </div>
+              </button>
+              <button class="dropdown-item biome-pill-btn" data-biome="coastal" data-name="Coastal" data-icon="🏝️">
+                <span class="dropdown-item-icon">🏝️</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Coastal</span>
+                  <span class="dropdown-item-desc">Tropical archipelago & ocean waters</span>
+                </div>
+              </button>
+              <button class="dropdown-item biome-pill-btn" data-biome="plains" data-name="Plains" data-icon="🌾">
+                <span class="dropdown-item-icon">🌾</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Plains</span>
+                  <span class="dropdown-item-desc">Expansive fertile flatlands with pond</span>
+                </div>
+              </button>
+            </div>
           </div>
-          <div class="demand-col">
-            <div class="demand-bar bar-com" id="bar-com" style="height: 40%"></div>
-            <span class="demand-lbl">C</span>
-          </div>
-          <div class="demand-col">
-            <div class="demand-bar bar-ind" id="bar-ind" style="height: 30%"></div>
-            <span class="demand-lbl">I</span>
-          </div>
-        </div>
 
-        <!-- Simulation Speed Controls -->
-        <div class="speed-controls">
-          <button class="speed-btn" data-speed="0" title="Pause">⏸</button>
-          <button class="speed-btn active" data-speed="1" title="1x Speed">▶</button>
-          <button class="speed-btn" data-speed="2" title="2x Speed">▶▶</button>
-          <button class="speed-btn" data-speed="3" title="3x Fast Forward">▶▶▶</button>
+          <!-- Pocket City Free Roam Drive Mode Button -->
+          <button id="btn-drive-mode" class="drive-mode-launch-btn" title="Explore your city from street level in Drive Mode! (Shortcut: T)">
+            <span class="drive-icon">🚗</span>
+            <span class="drive-text">Drive Mode</span>
+            <span class="drive-badge-key">T</span>
+          </button>
         </div>
-
-        <!-- Predefined City Plans Dropdown Selector -->
-        <div class="plan-selector" title="Predefined Starter City Layouts">
-          <span class="plan-label">PLANS:</span>
-          <button class="plan-pill-btn active" data-plan-id="clear" title="Plain untouched terrain">🌱 Blank</button>
-          <button class="plan-pill-btn" data-plan-id="curved_boulevard" title="Scenic curved loops, circular ring avenues & emerald coast">🔄 Curved Bay</button>
-          <button class="plan-pill-btn" data-plan-id="suburban_garden" title="Tree-lined neighborhood with central park & crescent loops">🏡 Garden City</button>
-          <button class="plan-pill-btn" data-plan-id="metro_expressway" title="Elevated highway overpass with high-rise downtown">🌉 Metropolis</button>
-          <button class="plan-pill-btn" data-plan-id="river_valley" title="Industrial port & clean tech residential district">🏭 Tech Port</button>
-        </div>
-
-        <!-- Biome / Area Terrain Selector -->
-        <div class="biome-selector" title="Choose Area / Biome Terrain">
-          <span class="biome-label">AREA:</span>
-          <button class="biome-pill-btn active" data-biome="valley" title="Lush Green Valley with meandering river & shoreline">🌿 Valley</button>
-          <button class="biome-pill-btn" data-biome="mountains" title="Highland Peaks, stone cliffs & alpine crater lake">⛰️ Mountains</button>
-          <button class="biome-pill-btn" data-biome="desert" title="Golden sand dunes, sandstone canyons & desert oasis">🏜️ Desert</button>
-          <button class="biome-pill-btn" data-biome="coastal" title="Tropical archipelago with sandy beaches & ocean bay">🏝️ Coastal</button>
-          <button class="biome-pill-btn" data-biome="plains" title="Open flat grassland with pond, perfect for megacities">🌾 Plains</button>
-        </div>
-
-        <!-- Pocket City Free Roam Drive Mode Button -->
-        <button id="btn-drive-mode" class="drive-mode-launch-btn" title="Explore your city from street level in Drive Mode! (Shortcut: T)">
-          <span class="drive-icon">🚗</span>
-          <span class="drive-text">Drive Mode</span>
-          <span class="drive-badge-key">T</span>
-        </button>
       </header>
 
       <!-- CS2 Infoviews Overlay Filter Bar (Right-side Pills) -->
@@ -143,9 +228,14 @@
           <span class="road-cost">$30</span>
         </button>
         <button class="road-type-btn" data-road-type="highway" title="Elevated Highway on Concrete Pylons ($50)">
-          <span class="road-icon">🌉</span>
+          <span class="road-icon">🛣️</span>
           <span class="road-title">Highway</span>
           <span class="road-cost">$50</span>
+        </button>
+        <button class="road-type-btn" data-road-type="bridge" title="Water Bridge on Deep Marine Piers & Stay Cables ($45) (B) - Cross rivers and bays!">
+          <span class="road-icon">🌉</span>
+          <span class="road-title">Bridge</span>
+          <span class="road-cost">$45</span>
         </button>
       </div>
 
@@ -297,6 +387,35 @@
       <!-- Floating Tooltip / Instructions -->
       <div id="hint-box">
         <span id="hint-text">💡 <b>Hold [Space] + Drag</b> to pan around (like Illustrator) | <b>Right-click</b> to orbit | <b>Scroll</b> to zoom</span>
+      </div>
+
+      <!-- Autosave Status Toast -->
+      <div id="autosave-toast" class="autosave-toast">
+        <span class="autosave-icon">💾</span>
+        <span id="autosave-text" class="autosave-text">City progress autosaved</span>
+      </div>
+
+      <!-- Terrain Update Confirmation Modal -->
+      <div id="confirm-modal-overlay" class="modal-overlay">
+        <div class="modal-box">
+          <div class="modal-header">
+            <span class="modal-icon">⚠️</span>
+            <h3 id="modal-title" class="modal-title">Regenerate Terrain &amp; Reset City?</h3>
+          </div>
+          <div class="modal-body">
+            <p id="modal-warning-text">
+              You have an active city with roads, buildings, and infrastructure. Changing the terrain will regenerate the landscape and wipe your existing city progress.
+            </p>
+            <div class="modal-callout">
+              <span class="callout-icon">💡</span>
+              <span>Your city progress is automatically saved to your browser. If you proceed, a brand new map will be generated for this area.</span>
+            </div>
+          </div>
+          <div class="modal-actions">
+            <button id="modal-cancel-btn" class="modal-btn secondary">Cancel</button>
+            <button id="modal-confirm-btn" class="modal-btn danger">Proceed &amp; Regenerate</button>
+          </div>
+        </div>
       </div>
     </div>
 

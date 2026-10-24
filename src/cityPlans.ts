@@ -15,6 +15,7 @@ export const CITY_PLANS: PredefinedPlan[] = [
     badge: 'BLANK',
     description: 'Empty pristine landscape. Start from absolute zero.',
     load: (world: CityWorld) => {
+      world.generateBiome('plains');
       world.clearAll();
       world.stats.money = 50000;
       world.stats.day = 1;
@@ -27,6 +28,7 @@ export const CITY_PLANS: PredefinedPlan[] = [
     badge: 'GARDEN',
     description: 'Tree-lined neighborhood with sweeping curved crescent loops, central park, and wind energy.',
     load: (world: CityWorld) => {
+      world.generateBiome('plains');
       world.clearAll();
       world.stats.money = 65000;
 
@@ -134,6 +136,7 @@ export const CITY_PLANS: PredefinedPlan[] = [
     badge: 'METRO',
     description: 'Elevated highway overpass, 4-lane avenues, coal energy grid, and bustling high-density downtown.',
     load: (world: CityWorld) => {
+      world.generateBiome('plains');
       world.clearAll();
       world.stats.money = 85000;
 
@@ -239,6 +242,7 @@ export const CITY_PLANS: PredefinedPlan[] = [
     badge: 'VALLEY',
     description: 'Separated clean tech residential district, wind farm, and high-capacity manufacturing zone.',
     load: (world: CityWorld) => {
+      world.generateBiome('valley');
       world.clearAll();
       world.stats.money = 75000;
 
@@ -318,6 +322,7 @@ export const CITY_PLANS: PredefinedPlan[] = [
     badge: 'BOULEVARD',
     description: 'Scenic coastal city with sweeping curved avenue rings, smooth corner turns, and vibrant seaside zoning.',
     load: (world: CityWorld) => {
+      world.generateBiome('coastal');
       world.clearAll();
       world.stats.money = 80000;
 
