@@ -191,6 +191,46 @@
             </div>
           </div>
 
+          <!-- Land Patch / City Map Size Selector -->
+          <div class="custom-dropdown" id="size-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-size-dropdown" title="Choose Land Patch Size (Small, Medium, Large, Extra Large)">
+              <span class="dropdown-icon" id="size-dropdown-icon">📐</span>
+              <span class="dropdown-text" id="size-dropdown-text">Patch: Medium</span>
+              <span class="dropdown-chevron">▾</span>
+            </button>
+            <div class="dropdown-menu" id="size-dropdown-menu">
+              <div class="dropdown-menu-header">MAP PATCH SIZE</div>
+              <button class="dropdown-item size-pill-btn" data-size="48" data-name="Small (48×48)" data-short-name="Small" data-icon="▫️">
+                <span class="dropdown-item-icon">▫️</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Small Patch (48×48)</span>
+                  <span class="dropdown-item-desc">2,304 tiles • Cozy town & ultra-fast FPS</span>
+                </div>
+              </button>
+              <button class="dropdown-item size-pill-btn active" data-size="64" data-name="Medium (64×64)" data-short-name="Medium" data-icon="◻️">
+                <span class="dropdown-item-icon">◻️</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Medium Patch (64×64)</span>
+                  <span class="dropdown-item-desc">4,096 tiles • Standard metropolis [Default]</span>
+                </div>
+              </button>
+              <button class="dropdown-item size-pill-btn" data-size="96" data-name="Large (96×96)" data-short-name="Large" data-icon="🏬">
+                <span class="dropdown-item-icon">🏬</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Large Patch (96×96)</span>
+                  <span class="dropdown-item-desc">9,216 tiles • Regional sprawl & high density</span>
+                </div>
+              </button>
+              <button class="dropdown-item size-pill-btn" data-size="128" data-name="Extra Large (128×128)" data-short-name="Extra Large" data-icon="🌐">
+                <span class="dropdown-item-icon">🌐</span>
+                <div class="dropdown-item-text">
+                  <span class="dropdown-item-name">Extra Large Patch (128×128)</span>
+                  <span class="dropdown-item-desc">16,384 tiles • Massive megacity for millions</span>
+                </div>
+              </button>
+            </div>
+          </div>
+
           <!-- Pocket City Free Roam Drive Mode Button -->
           <button id="btn-drive-mode" class="drive-mode-launch-btn" title="Explore your city from street level in Drive Mode! (Shortcut: T)">
             <span class="drive-icon">🚗</span>

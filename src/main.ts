@@ -54,7 +54,7 @@ class GameApp {
       45,
       window.innerWidth / window.innerHeight,
       0.1,
-      500
+      1000
     );
 
     this.renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -92,12 +92,17 @@ class GameApp {
     // Check for existing saved city and restore
     if (this.world.loadCityFromStorage()) {
       this.world.sanitizeBridgesOnLand();
+      this.updateSunAndCameraForMapSize(this.world.size);
       this.syncDropdownsToCurrentBiome();
+      this.syncDropdownsToCurrentSize();
       this.updateUIStats();
       this.updateDayNightCycle();
       setTimeout(() => {
         this.showAutosaveToast('Restored city progress from autosave');
       }, 500);
+    } else {
+      this.updateSunAndCameraForMapSize(this.world.size);
+      this.syncDropdownsToCurrentSize();
     }
 
     // Window & Tab lifecycle autosave listeners
@@ -132,9 +137,10 @@ class GameApp {
 
     // Sun / Moon continuous angular progression around the city
     const sunAngle = ((t - 6) / 24) * Math.PI * 2;
-    this.sunLight.position.x = Math.cos(sunAngle) * 55;
-    this.sunLight.position.y = Math.max(-20, Math.sin(sunAngle) * 55);
-    this.sunLight.position.z = Math.sin(sunAngle * 0.5) * 30;
+    const dist = Math.max(55, (this.world.size / 2) * 1.75);
+    this.sunLight.position.x = Math.cos(sunAngle) * dist;
+    this.sunLight.position.y = Math.max(-20, Math.sin(sunAngle) * dist);
+    this.sunLight.position.z = Math.sin(sunAngle * 0.5) * (dist * 0.55);
 
     const skyColor = new THREE.Color();
     const sunColor = new THREE.Color();
@@ -312,7 +318,7 @@ class GameApp {
       });
     });
 
-    // Custom Dropdown Controls (Plans & Biomes)
+    // Custom Dropdown Controls (Plans, Biomes & Land Patch Sizes)
     const planDropdownBtn = document.getElementById('btn-plan-dropdown');
     const planDropdownMenu = document.getElementById('plan-dropdown-menu');
     const planDropdownText = document.getElementById('plan-dropdown-text');
@@ -323,9 +329,15 @@ class GameApp {
     const biomeDropdownText = document.getElementById('biome-dropdown-text');
     const biomeDropdownIcon = document.getElementById('biome-dropdown-icon');
 
+    const sizeDropdownBtn = document.getElementById('btn-size-dropdown');
+    const sizeDropdownMenu = document.getElementById('size-dropdown-menu');
+    const sizeDropdownText = document.getElementById('size-dropdown-text');
+    const sizeDropdownIcon = document.getElementById('size-dropdown-icon');
+
     const closeAllDropdowns = () => {
       planDropdownMenu?.classList.remove('open');
       biomeDropdownMenu?.classList.remove('open');
+      sizeDropdownMenu?.classList.remove('open');
     };
 
     planDropdownBtn?.addEventListener('click', (e) => {
@@ -342,12 +354,20 @@ class GameApp {
       if (!isOpen) biomeDropdownMenu?.classList.add('open');
     });
 
+    sizeDropdownBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const isOpen = sizeDropdownMenu?.classList.contains('open');
+      closeAllDropdowns();
+      if (!isOpen) sizeDropdownMenu?.classList.add('open');
+    });
+
     window.addEventListener('click', () => {
       closeAllDropdowns();
     });
 
     planDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
     biomeDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
+    sizeDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
 
     // Predefined City Plans Loader
     const planButtons = document.querySelectorAll<HTMLButtonElement>('.plan-pill-btn');
@@ -368,6 +388,7 @@ class GameApp {
           plan.load(this.world);
 
           this.syncDropdownsToCurrentBiome();
+          this.syncDropdownsToCurrentSize();
           this.updateUIStats();
           this.updateDayNightCycle();
           this.autosave(false);
@@ -402,6 +423,7 @@ class GameApp {
           if (biomeDropdownIcon) biomeDropdownIcon.textContent = biomeIcon;
           closeAllDropdowns();
           this.world.generateBiome(biome);
+          this.syncDropdownsToCurrentSize();
           this.updateUIStats();
           this.updateDayNightCycle();
           this.autosave(false);
@@ -417,6 +439,51 @@ class GameApp {
           );
         } else {
           executeChangeBiome();
+        }
+      });
+    });
+
+    // Land Patch / City Map Size Selector
+    const sizeButtons = document.querySelectorAll<HTMLButtonElement>('.size-pill-btn');
+    sizeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const sizeVal = parseInt(btn.dataset.size || '64', 10);
+        const sizeName = btn.dataset.name || 'Medium (64×64)';
+        const shortName = btn.dataset.shortName || 'Medium';
+        const sizeIcon = btn.dataset.icon || '◻️';
+
+        if (this.world.size === sizeVal) {
+          closeAllDropdowns();
+          return;
+        }
+
+        const executeResizePatch = () => {
+          sizeButtons.forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          if (sizeDropdownText) sizeDropdownText.textContent = `Patch: ${shortName}`;
+          if (sizeDropdownIcon) sizeDropdownIcon.textContent = sizeIcon;
+          closeAllDropdowns();
+
+          this.world.setMapSize(sizeVal);
+          this.world.generateBiome(this.world.currentBiome);
+          this.updateSunAndCameraForMapSize(sizeVal);
+          this.syncDropdownsToCurrentBiome();
+          this.syncDropdownsToCurrentSize();
+          this.updateUIStats();
+          this.updateDayNightCycle();
+          this.autosave(false);
+          this.showAutosaveToast(`Map patch resized to ${sizeName}`);
+        };
+
+        if (this.world.hasActiveCity()) {
+          closeAllDropdowns();
+          this.showConfirmModal(
+            'Resize Land Patch & Reset City?',
+            `You have an active city with roads, buildings, and infrastructure. Changing the patch size to ${sizeName} will regenerate the terrain grid to ${sizeVal}×${sizeVal} tiles and reset your existing city developments.`,
+            executeResizePatch
+          );
+        } else {
+          executeResizePatch();
         }
       });
     });
@@ -586,6 +653,41 @@ class GameApp {
     const biomeButtons = document.querySelectorAll<HTMLButtonElement>('.biome-pill-btn');
     biomeButtons.forEach(b => {
       b.classList.toggle('active', b.dataset.biome === this.world.currentBiome);
+    });
+  }
+
+  private updateSunAndCameraForMapSize(mapSize: number) {
+    const half = mapSize / 2;
+    const d = Math.max(35, half * 1.15);
+    this.sunLight.shadow.camera.left = -d;
+    this.sunLight.shadow.camera.right = d;
+    this.sunLight.shadow.camera.top = d;
+    this.sunLight.shadow.camera.bottom = -d;
+    this.sunLight.shadow.camera.far = Math.max(120, half * 4.0);
+    this.sunLight.shadow.camera.updateProjectionMatrix();
+
+    if (this.scene.fog && (this.scene.fog as THREE.FogExp2).density !== undefined) {
+      (this.scene.fog as THREE.FogExp2).density = 0.015 * (64 / mapSize);
+    }
+
+    this.controls.setMaxZoomForMapSize(mapSize);
+  }
+
+  private syncDropdownsToCurrentSize() {
+    const sizeMap: Record<number, { name: string; short: string; icon: string }> = {
+      48: { name: 'Small (48×48)', short: 'Small', icon: '▫️' },
+      64: { name: 'Medium (64×64)', short: 'Medium', icon: '◻️' },
+      96: { name: 'Large (96×96)', short: 'Large', icon: '🏬' },
+      128: { name: 'Extra Large (128×128)', short: 'Extra Large', icon: '🌐' }
+    };
+    const sInfo = sizeMap[this.world.size] || sizeMap[64];
+    const sizeDropdownText = document.getElementById('size-dropdown-text');
+    const sizeDropdownIcon = document.getElementById('size-dropdown-icon');
+    if (sizeDropdownText) sizeDropdownText.textContent = `Patch: ${sInfo.short}`;
+    if (sizeDropdownIcon) sizeDropdownIcon.textContent = sInfo.icon;
+    const sizeButtons = document.querySelectorAll<HTMLButtonElement>('.size-pill-btn');
+    sizeButtons.forEach(b => {
+      b.classList.toggle('active', parseInt(b.dataset.size || '0', 10) === this.world.size);
     });
   }
 

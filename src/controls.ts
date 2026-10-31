@@ -7,6 +7,8 @@ export class VoxelCameraControls {
 
   public target: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
   public radius: number = 28;
+  public minRadius: number = 6;
+  public maxRadius: number = 95;
   public theta: number = Math.PI / 4; // Horizontal rotation
   public phi: number = Math.PI / 3.5; // Vertical pitch
 
@@ -21,6 +23,14 @@ export class VoxelCameraControls {
     this.domElement = domElement;
     this.updateCamera();
     this.setupListeners();
+  }
+
+  public setMaxZoomForMapSize(mapSize: number) {
+    this.maxRadius = Math.max(95, Math.round(mapSize * 1.5));
+    if (this.radius > this.maxRadius) {
+      this.radius = this.maxRadius;
+      this.updateCamera();
+    }
   }
 
   private setupListeners() {
@@ -116,14 +126,14 @@ export class VoxelCameraControls {
     this.domElement.addEventListener('wheel', (e) => {
       if (!this.enabled) return;
       e.preventDefault();
-      this.radius = Math.max(6, Math.min(95, this.radius + e.deltaY * 0.035));
+      this.radius = Math.max(this.minRadius, Math.min(this.maxRadius, this.radius + e.deltaY * 0.035));
       this.updateCamera();
     }, { passive: false });
 
     // Keyboard Pan (WASD / Arrows / QE rotation)
     window.addEventListener('keydown', (e) => {
       if (!this.enabled) return;
-      const speed = 1.0;
+      const speed = 1.0 * Math.max(1, this.radius / 25);
       const forward = new THREE.Vector3();
       this.camera.getWorldDirection(forward);
       forward.y = 0;

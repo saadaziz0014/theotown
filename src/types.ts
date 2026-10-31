@@ -22,6 +22,8 @@ export type TileType =
 
 export type BiomeType = 'valley' | 'mountains' | 'desert' | 'coastal' | 'plains';
 
+export type PatchSize = 48 | 64 | 96 | 128;
+
 export type RoadType = 'dirt' | 'suburban' | 'avenue' | 'highway' | 'bridge';
 
 export interface RoadConfig {

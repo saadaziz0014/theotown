@@ -138,14 +138,30 @@ export class CityWorld {
     return `${x},${z}`;
   }
 
-  private initTerrain() {
+  public setMapSize(newSize: number) {
+    if (this.size === newSize && this.groundMesh) return;
+    this.size = newSize;
+
+    if (this.groundMesh) {
+      this.scene.remove(this.groundMesh);
+      this.groundMesh.geometry?.dispose();
+      if (Array.isArray(this.groundMesh.material)) {
+        this.groundMesh.material.forEach((m: any) => m.dispose());
+      } else {
+        this.groundMesh.material?.dispose();
+      }
+    }
+
     const totalTiles = this.size * this.size;
     const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshLambertMaterial({ vertexColors: false });
     this.groundMesh = new THREE.InstancedMesh(geometry, material, totalTiles);
     this.groundMesh.receiveShadow = true;
     this.scene.add(this.groundMesh);
+  }
 
+  private initTerrain() {
+    this.setMapSize(this.size || 64);
     this.generateBiome('valley');
   }
 
@@ -159,6 +175,7 @@ export class CityWorld {
     this.baseTerrainColors.clear();
 
     const half = this.size / 2;
+    const scale = this.size / 64;
     let index = 0;
 
     for (let x = -half; x < half; x++) {
@@ -171,14 +188,16 @@ export class CityWorld {
         switch (biome) {
           case 'valley': {
             // Winding scenic river flowing along the southern waterfront with sandy shoreline
-            const riverZ = 7.5 + Math.sin(x * 0.22) * 2.2;
+            const riverZ = (this.size * 0.12) + Math.sin(x * (0.22 / Math.sqrt(scale))) * (2.2 * Math.sqrt(scale));
             const distToRiver = Math.abs(z - riverZ);
+            const riverW = Math.max(1.5, 1.5 * Math.sqrt(scale));
+            const sandW = riverW + 1.1 * Math.sqrt(scale);
 
-            if (distToRiver <= 1.5) {
+            if (distToRiver <= riverW) {
               tileType = 'water';
               topY = -0.07;
               colorVal = (Math.sin(x * 0.5) > 0) ? 0x2563eb : 0x3b82f6;
-            } else if (distToRiver <= 2.6) {
+            } else if (distToRiver <= sandW) {
               tileType = 'sand';
               topY = -0.02;
               colorVal = (Math.cos(x * 0.4) > 0) ? 0xd4b878 : 0xe5d08f;
@@ -192,15 +211,16 @@ export class CityWorld {
 
           case 'mountains': {
             // Central & Southwest Alpine Valley
-            const distValley = Math.hypot((x + 2) * 0.85, (z - 4) * 1.15);
+            const distValley = Math.hypot((x + 2 * scale) * 0.85, (z - 4 * scale) * 1.15) / scale;
             // High mountain pass winding north
-            const passCenter = 4.0 + Math.sin(z * 0.3) * 1.5;
-            const isPass = z <= 0 && Math.abs(x - passCenter) < 2.2;
+            const passCenter = (4.0 * scale) + Math.sin(z * (0.3 / Math.sqrt(scale))) * (1.5 * scale);
+            const isPass = z <= 0 && Math.abs(x - passCenter) < (2.2 * Math.sqrt(scale));
 
             // Alpine Glacial Tarn Cirque Lake (Northwest)
-            const lakeDist = Math.hypot(x + 8, z + 9);
+            const lakeDist = Math.hypot(x + 8 * scale, z + 9 * scale) / scale;
             // Mountain stream tumbling down from the tarn
-            const isStream = x === -7 && z >= -7 && z <= -2;
+            const streamX = Math.round(-7 * scale);
+            const isStream = Math.abs(x - streamX) <= Math.max(0, Math.floor(scale * 0.5)) && z >= (-7 * scale) && z <= (-2 * scale);
 
             if (lakeDist < 2.2) {
               tileType = 'water';
@@ -212,13 +232,15 @@ export class CityWorld {
               colorVal = 0x94a3b8;
             } else if (isStream) {
               tileType = 'water';
-              topY = (z <= -5 ? 0.35 : 0.0) - 0.07;
+              topY = (z <= (-5 * scale) ? 0.35 : 0.0) - 0.07;
               colorVal = 0x38bdf8;
             } else {
-              // Mountain Massif Envelopes
-              const massifN = Math.max(0, (-z - 1.0) / 14) ** 0.85 * Math.max(0, 1.0 - (x - 3) / 12);
-              const massifE = Math.max(0, (x - 4.5) / 11) ** 0.9 * Math.max(0, 1.0 - (z - 12) / 10);
-              const massifS = Math.max(0, (z - 9) / 6) * Math.max(0, (-x - 2) / 13) * 0.7;
+              // Mountain Massif Envelopes framed along northern & eastern edges
+              const normZ = z / half;
+              const normX = x / half;
+              const massifN = Math.max(0, -normZ - 0.05) ** 0.85 * Math.max(0, 1.0 - normX * 0.7);
+              const massifE = Math.max(0, normX - 0.08) ** 0.9 * Math.max(0, 1.0 - normZ * 0.65);
+              const massifS = Math.max(0, normZ - 0.32) * Math.max(0, -normX - 0.05) * 0.75;
               const baseEnvelope = Math.max(massifN, massifE, massifS);
 
               // Multi-octave fractal ridge noise (arêtes and jagged crests)
@@ -229,9 +251,9 @@ export class CityWorld {
               let rawH = baseEnvelope * ((r1 ** 1.8) * 1.75 + r2 * 0.85 + r3);
 
               // Prominent Mountain Horn Summits
-              const distHorn = Math.hypot(x + 8, z + 12);
+              const distHorn = Math.hypot(x + 8 * scale, z + 12 * scale) / scale;
               rawH += Math.max(0, 1.0 - distHorn / 4.8) ** 2 * 1.4;
-              const distSpire = Math.hypot(x - 12, z + 7);
+              const distSpire = Math.hypot(x - 12 * scale, z + 7 * scale) / scale;
               rawH += Math.max(0, 1.0 - distSpire / 4.5) ** 2 * 1.2;
 
               // Valley basin & pass protection for city construction
@@ -277,15 +299,17 @@ export class CityWorld {
 
           case 'desert': {
             // Golden sand dunes, sandstone canyon cliffs and emerald oasis
-            const oasisDist = Math.hypot(x - 10, z + 10);
-            const isCanyonMesa = (x > 11 && z > 10) || (x < -12 && z < -11);
+            const oasisDist = Math.hypot(x - 10 * scale, z + 10 * scale);
+            const isCanyonMesa = (x > (11 * scale) && z > (10 * scale)) || (x < (-12 * scale) && z < (-11 * scale));
             const dune = Math.sin(x * 0.35 + z * 0.15) * 0.03 + Math.cos(z * 0.4) * 0.02;
+            const oasisR = 2.2 * Math.sqrt(scale);
+            const oasisGreeneryR = 3.6 * Math.sqrt(scale);
 
-            if (oasisDist < 2.2) {
+            if (oasisDist < oasisR) {
               tileType = 'water';
               topY = -0.06;
               colorVal = 0x06b6d4; // Turquoise oasis spring
-            } else if (oasisDist < 3.6) {
+            } else if (oasisDist < oasisGreeneryR) {
               tileType = 'grass';
               topY = -0.01;
               colorVal = 0x15803d; // Oasis palm greenery
@@ -304,16 +328,20 @@ export class CityWorld {
 
           case 'coastal': {
             // Central tropical island surrounded by ocean waters & sandy beaches
-            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.35) * 1.5 + Math.cos(z * 0.35) * 1.5;
-            if (islandRadius > 14.5) {
+            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.3) * (1.5 * scale) + Math.cos(z * 0.3) * (1.5 * scale);
+            const rOcean = half * 0.48;
+            const rCoast = half * 0.42;
+            const rBeach = half * 0.36;
+
+            if (islandRadius > rOcean) {
               tileType = 'water';
               topY = -0.08;
               colorVal = 0x0284c7; // Deep ocean
-            } else if (islandRadius > 13.0) {
+            } else if (islandRadius > rCoast) {
               tileType = 'water';
               topY = -0.05;
               colorVal = 0x38bdf8; // Shallow coastal waters
-            } else if (islandRadius > 11.2) {
+            } else if (islandRadius > rBeach) {
               tileType = 'sand';
               topY = -0.01;
               colorVal = ((x + z) % 2 === 0) ? 0xfef08a : 0xfde047; // Beach
@@ -328,12 +356,13 @@ export class CityWorld {
           case 'plains':
           default: {
             // Wide open fertile flatlands with corner pond, ideal for sprawling cities
-            const pondDist = Math.hypot(x - 11, z + 11);
-            if (pondDist < 2.8) {
+            const pondDist = Math.hypot(x - half * 0.35, z + half * 0.35);
+            const pondR = 2.8 * Math.sqrt(scale);
+            if (pondDist < pondR) {
               tileType = 'water';
               topY = -0.06;
               colorVal = 0x3b82f6;
-            } else if (pondDist < 3.8) {
+            } else if (pondDist < pondR + 1.0) {
               tileType = 'sand';
               topY = -0.02;
               colorVal = 0xd4b878;
@@ -1521,6 +1550,7 @@ export class CityWorld {
         version: 1,
         timestamp: Date.now(),
         biome: this.currentBiome,
+        size: this.size,
         stats: { ...this.stats },
         roads: roadList,
         services: serviceList,
@@ -1547,6 +1577,11 @@ export class CityWorld {
       if (!data || !data.biome) return false;
 
       this.isRestoringSave = true;
+      if (data.size && [48, 64, 96, 128].includes(data.size)) {
+        this.setMapSize(data.size);
+      } else {
+        this.setMapSize(64);
+      }
       this.generateBiome(data.biome);
 
       // Restore Roads
@@ -1778,7 +1813,8 @@ export class CityWorld {
     }
 
     // 3. Citizen & Vehicle Spawning
-    const maxCars = Math.min(Math.floor(this.roads.size * 0.45) + 3, 30);
+    const sizeScale = this.size / 64;
+    const maxCars = Math.min(Math.floor(this.roads.size * 0.45) + 3, Math.round(30 * sizeScale));
     if (this.roads.size >= 4 && this.cars.length < maxCars) {
       if (Math.random() < 0.35 * this.stats.gameSpeed) {
         this.spawnCar();
@@ -1786,7 +1822,7 @@ export class CityWorld {
     }
 
     // Spawn walking citizens along sidewalks only when there are citizens (population > 0)
-    const allowedPeds = Math.min(Math.floor(this.stats.population / 3), 20);
+    const allowedPeds = Math.min(Math.floor(this.stats.population / 25) + 2, Math.round(25 * sizeScale));
     if (this.roads.size >= 2 && this.pedestrians.length < allowedPeds) {
       if (Math.random() < 0.35 * this.stats.gameSpeed) {
         this.spawnPedestrian();
@@ -1946,24 +1982,25 @@ export class CityWorld {
     let building = this.buildings.get(key);
 
     if (!building) {
-      const maxH = zoneType === 'residential' ? 2 + Math.floor(Math.random() * 3) :
-                   zoneType === 'commercial' ? 3 + Math.floor(Math.random() * 6) :
-                   1 + Math.floor(Math.random() * 2);
+      const initialMaxH = zoneType === 'residential' ? 2 + Math.floor(Math.random() * 3) :
+                          zoneType === 'commercial' ? 3 + Math.floor(Math.random() * 4) :
+                          1 + Math.floor(Math.random() * 2);
 
       const wallColors = zoneType === 'residential' ? this.COLORS.resWall :
                          zoneType === 'commercial' ? this.COLORS.comWall :
                          this.COLORS.indWall;
       const wallColor = wallColors[Math.floor(Math.random() * wallColors.length)];
+      const initialOccupants = zoneType === 'residential' ? 14 : zoneType === 'commercial' ? 20 : 25;
 
       building = {
         id: key,
         x,
         z,
         height: 1,
-        maxHeight: maxH,
+        maxHeight: initialMaxH,
         zoneType,
         level: 1,
-        occupants: 4,
+        occupants: initialOccupants,
         color: wallColor,
         trimColor: this.COLORS.resRoof[Math.floor(Math.random() * this.COLORS.resRoof.length)],
         hasPower: true,
@@ -1980,10 +2017,35 @@ export class CityWorld {
       const marker = this.zoneMarkers.get(key);
       if (marker) marker.visible = false;
     } else {
+      // Skyscraper level-up upgrades when well-serviced by utilities and public safety
+      const isServiced = building.hasPower && building.hasWater && building.happiness >= 65;
+      if (isServiced && building.height >= building.maxHeight) {
+        if (building.zoneType === 'residential' && building.maxHeight < 14) {
+          building.maxHeight += 2;
+        } else if (building.zoneType === 'commercial' && building.maxHeight < 16) {
+          building.maxHeight += 2;
+        } else if (building.zoneType === 'industrial' && building.maxHeight < 6) {
+          building.maxHeight += 1;
+        }
+      }
+
       if (building.height < building.maxHeight) {
         building.height++;
-        building.occupants += 4;
         building.level = Math.ceil(building.height / 2);
+
+        // Density scaling: low-rise -> mid-rise -> high-rise -> megacity skyscraper (millions of population)
+        if (building.height <= 2) {
+          building.occupants = 14 + building.height * 14;
+        } else if (building.height <= 4) {
+          building.occupants = 65 + (building.height - 2) * 110;
+        } else if (building.height <= 7) {
+          building.occupants = 450 + (building.height - 4) * 750;
+        } else if (building.height <= 10) {
+          building.occupants = 3200 + (building.height - 7) * 3500;
+        } else {
+          building.occupants = 16000 + (building.height - 10) * 9000; // 16,000 to 52,000 per mega tower
+        }
+
         this.buildVoxelMesh(building);
       }
     }
