@@ -465,7 +465,7 @@ body, html {
 }
 
 /* Road Submenu Dock */
-.road-submenu, .service-submenu {
+.road-submenu, .service-submenu, .rail-submenu {
   position: fixed;
   bottom: 102px;
   left: 50%;
@@ -485,7 +485,7 @@ body, html {
   z-index: 101;
 }
 
-.road-submenu.visible, .service-submenu.visible {
+.road-submenu.visible, .service-submenu.visible, .rail-submenu.visible {
   display: flex;
   opacity: 1;
   transform: translateX(-50%) translateY(0);
@@ -499,7 +499,7 @@ body, html {
   margin-right: 4px;
 }
 
-.road-type-btn, .service-type-btn {
+.road-type-btn, .service-type-btn, .rail-type-btn {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -513,13 +513,13 @@ body, html {
   white-space: nowrap;
 }
 
-.road-type-btn:hover, .service-type-btn:hover {
+.road-type-btn:hover, .service-type-btn:hover, .rail-type-btn:hover {
   background: rgba(255, 255, 255, 0.12);
   color: #fff;
   transform: translateY(-2px);
 }
 
-.road-type-btn.active, .service-type-btn.active {
+.road-type-btn.active, .service-type-btn.active, .rail-type-btn.active {
   background: #3b82f6;
   border-color: #60a5fa;
   color: #fff;
@@ -544,7 +544,7 @@ body, html {
   border-radius: 6px;
 }
 
-.road-type-btn.active .road-cost, .service-type-btn.active .road-cost {
+.road-type-btn.active .road-cost, .service-type-btn.active .road-cost, .rail-type-btn.active .road-cost {
   color: #ffffff;
   background: rgba(255, 255, 255, 0.25);
 }

@@ -279,6 +279,26 @@
         </button>
       </div>
 
+      <!-- Rail Construction Submenu Dock -->
+      <div id="rail-submenu" class="rail-submenu">
+        <span class="submenu-label">RAIL NETWORK</span>
+        <button class="rail-type-btn active" data-rail-type="track" title="Railway Track ($25) (L) - Lay dual steel rail lines for passenger & freight trains">
+          <span class="road-icon">🛤️</span>
+          <span class="road-title">Track</span>
+          <span class="road-cost">$25</span>
+        </button>
+        <button class="rail-type-btn" data-rail-type="station_passenger" title="Passenger Train Station ($600) - Commuter rail terminal boosting happiness +15">
+          <span class="road-icon">🚉</span>
+          <span class="road-title">Passenger Station</span>
+          <span class="road-cost">$600</span>
+        </button>
+        <button class="rail-type-btn" data-rail-type="station_freight" title="Freight Cargo Depot ($850) - Industrial rail terminal with gantry crane & containers">
+          <span class="road-icon">🏭</span>
+          <span class="road-title">Freight Depot</span>
+          <span class="road-cost">$850</span>
+        </button>
+      </div>
+
       <!-- Service Buildings Submenu Dock -->
       <div id="service-submenu" class="service-submenu">
         <span class="submenu-label">SERVICES</span>
@@ -355,6 +375,11 @@
           <button class="tool-btn active" data-tool="road" title="Road Construction (R)">
             <span class="btn-icon">🛣️</span>
             <span class="btn-name">Roads</span>
+          </button>
+
+          <button class="tool-btn rail-btn" data-tool="rail" title="Rail Networks & Trains ($25) (L)">
+            <span class="btn-icon">🛤️</span>
+            <span class="btn-name">Rail</span>
           </button>
 
           <div class="tool-divider"></div>

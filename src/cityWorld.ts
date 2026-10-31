@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { 
   TileType, 
   RoadTile, 
+  RailTile,
+  TrainCarriage,
+  TrainAgent,
   VoxelBuilding, 
   CarAgent, 
   PedestrianAgent, 
@@ -17,6 +20,7 @@ import type {
 } from './types';
 import { VoxelVehicleBuilder } from './vehicleBuilder';
 import { VoxelRoadBuilder, ROAD_CONFIGS } from './roadBuilder';
+import { VoxelRailBuilder } from './railBuilder';
 import { VoxelServiceBuilder, SERVICE_DEFS } from './serviceBuilder';
 import { VoxelPedestrianBuilder } from './pedestrianBuilder';
 import { VoxelUtilityBuilder } from './utilityBuilder';
@@ -31,13 +35,18 @@ export class CityWorld {
   public overlayGroup: THREE.Group = new THREE.Group();
   public highlightMesh!: THREE.Mesh;
   public roadPreviewGroup: THREE.Group = new THREE.Group();
+  public railPreviewGroup: THREE.Group = new THREE.Group();
   public utilityPreviewGroup: THREE.Group = new THREE.Group();
   public pipesGroup: THREE.Group = new THREE.Group();
   public wiresGroup: THREE.Group = new THREE.Group();
   public coverageGroup: THREE.Group = new THREE.Group();
+  public railsGroup: THREE.Group = new THREE.Group();
+  public trainsGroup: THREE.Group = new THREE.Group();
 
   public tiles: Map<string, TileType> = new Map();
   public roads: Map<string, RoadTile> = new Map();
+  public rails: Map<string, RailTile> = new Map();
+  public railMeshes: Map<string, THREE.Group> = new Map();
   public buildings: Map<string, VoxelBuilding> = new Map();
   public services: Map<string, PlacedService> = new Map();
   public pipes: Map<string, UtilityPipe> = new Map();
@@ -50,6 +59,8 @@ export class CityWorld {
   public isUndergroundMode: boolean = false;
   public cars: CarAgent[] = [];
   public pedestrians: PedestrianAgent[] = [];
+  public trains: TrainAgent[] = [];
+  public soundEngine?: any;
   public playerVehicle?: {
     x: number;
     z: number;
@@ -127,6 +138,8 @@ export class CityWorld {
     this.scene.add(this.servicesGroup);
     this.scene.add(this.carsGroup);
     this.scene.add(this.pedestriansGroup);
+    this.scene.add(this.railsGroup);
+    this.scene.add(this.trainsGroup);
     this.scene.add(this.overlayGroup);
     this.scene.add(this.utilityPreviewGroup);
     this.scene.add(this.sceneryGroup);
@@ -445,6 +458,9 @@ export class CityWorld {
 
     this.roadPreviewGroup.visible = false;
     this.scene.add(this.roadPreviewGroup);
+
+    this.railPreviewGroup.visible = false;
+    this.scene.add(this.railPreviewGroup);
   }
 
   public setHighlight(
@@ -460,6 +476,7 @@ export class CityWorld {
     if (tool === 'road') {
       this.highlightMesh.visible = false;
       this.utilityPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
 
       // Clear previous road preview
       this.roadPreviewGroup.clear();
@@ -508,8 +525,42 @@ export class CityWorld {
       this.roadPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
       this.roadPreviewGroup.add(previewMesh);
       this.roadPreviewGroup.visible = true;
+    } else if (tool === 'rail') {
+      this.highlightMesh.visible = false;
+      this.roadPreviewGroup.visible = false;
+      this.utilityPreviewGroup.visible = false;
+
+      this.railPreviewGroup.clear();
+
+      const north = this.rails.has(this.getKey(x, z - 1));
+      const south = this.rails.has(this.getKey(x, z + 1));
+      const east = this.rails.has(this.getKey(x + 1, z));
+      const west = this.rails.has(this.getKey(x - 1, z));
+
+      let hasNorth = north;
+      let hasSouth = south;
+      let hasEast = east;
+      let hasWest = west;
+
+      if (!hasNorth && !hasSouth && !hasEast && !hasWest) {
+        hasEast = true;
+        hasWest = true;
+      }
+
+      const previewMesh = VoxelRailBuilder.buildRailPreviewMesh(
+        hasNorth,
+        hasSouth,
+        hasEast,
+        hasWest,
+        valid
+      );
+
+      this.railPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
+      this.railPreviewGroup.add(previewMesh);
+      this.railPreviewGroup.visible = true;
     } else if (tool === 'pipe' || tool === 'wire') {
       this.roadPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
       this.highlightMesh.visible = false;
 
       this.utilityPreviewGroup.clear();
@@ -519,6 +570,7 @@ export class CityWorld {
       this.utilityPreviewGroup.visible = true;
     } else {
       this.roadPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
       this.utilityPreviewGroup.visible = false;
       this.highlightMesh.position.set(x + 0.5, topY + 0.05, z + 0.5);
 
@@ -539,6 +591,7 @@ export class CityWorld {
   public clearHighlight() {
     this.highlightMesh.visible = false;
     this.roadPreviewGroup.visible = false;
+    this.railPreviewGroup.visible = false;
     this.utilityPreviewGroup.visible = false;
   }
 
@@ -736,7 +789,13 @@ export class CityWorld {
     if (!this.isRestoringSave && this.stats.money < cost) return false;
     if (!this.isRestoringSave) this.stats.money -= cost;
 
+    const hadRail = this.rails.get(key);
     this.demolish(x, z, false);
+    if (hadRail) {
+      hadRail.isCrossing = true;
+      this.rails.set(key, hadRail);
+      this.createRailVoxelMesh(x, z);
+    }
 
     const config = ROAD_CONFIGS[effectiveType] || ROAD_CONFIGS.suburban;
     this.tiles.set(key, 'road');
@@ -827,6 +886,380 @@ export class CityWorld {
     const group = VoxelRoadBuilder.buildRoadMesh(road, this.streetLightsList);
     this.scene.add(group);
     this.roadMeshes.set(key, group);
+  }
+
+  // --- RAIL NETWORK (Tracks, Switches, Level Crossings & Trains) ---
+  public placeRail(x: number, z: number): boolean {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return false;
+    const key = this.getKey(x, z);
+    if (this.rails.has(key)) return true;
+
+    // Rail Track Cost: $25
+    if (!this.isRestoringSave && this.stats.money < 25) return false;
+
+    const isWater = this.isWaterTile(x, z);
+    const existingRoad = this.roads.get(key);
+
+    // Buildings and services block tracks (unless demolished first)
+    if (this.buildings.has(key)) return false;
+    if (this.services.has(key)) return false;
+
+    if (!this.isRestoringSave) {
+      this.stats.money -= 25;
+    }
+
+    const isCrossing = !!existingRoad;
+    const isBridge = isWater;
+    const elevation = isBridge ? 0.16 : 0.04;
+
+    const railTile: RailTile = {
+      x,
+      z,
+      hasNorth: false,
+      hasSouth: false,
+      hasEast: false,
+      hasWest: false,
+      elevation,
+      isBridge,
+      isCrossing
+    };
+
+    this.rails.set(key, railTile);
+    if (!existingRoad) {
+      this.tiles.set(key, 'rail');
+      if (!isWater) {
+        this.setGroundTileFoundation(x, z, 0.0);
+      }
+    }
+
+    this.updateRailConnections(x, z);
+    this.updateSurroundingRails(x, z);
+    this.createRailVoxelMesh(x, z);
+
+    if (existingRoad) {
+      this.createRoadVoxelMesh(x, z);
+    }
+
+    return true;
+  }
+
+  public demolishRail(x: number, z: number, refund: boolean = true): boolean {
+    const key = this.getKey(x, z);
+    const rail = this.rails.get(key);
+    if (!rail) return false;
+
+    if (refund) {
+      this.stats.money += 10;
+    }
+
+    const mesh = this.railMeshes.get(key);
+    if (mesh) {
+      this.railsGroup.remove(mesh);
+      mesh.traverse((c: any) => { if (c.isMesh) c.geometry?.dispose(); });
+      this.railMeshes.delete(key);
+    }
+
+    this.rails.delete(key);
+
+    const existingRoad = this.roads.get(key);
+    if (existingRoad) {
+      this.createRoadVoxelMesh(x, z);
+    } else {
+      const baseType = this.baseTerrainTypes.get(key) || 'grass';
+      this.tiles.set(key, baseType);
+    }
+
+    this.updateSurroundingRails(x, z);
+
+    // Remove any train that was on this track
+    for (let i = this.trains.length - 1; i >= 0; i--) {
+      const train = this.trains[i];
+      if (Math.floor(train.x) === x && Math.floor(train.z) === z) {
+        this.removeTrain(i);
+      }
+    }
+
+    return true;
+  }
+
+  private updateRailConnections(x: number, z: number) {
+    const rail = this.rails.get(this.getKey(x, z));
+    if (!rail) return;
+
+    rail.hasNorth = this.rails.has(this.getKey(x, z - 1));
+    rail.hasSouth = this.rails.has(this.getKey(x, z + 1));
+    rail.hasEast = this.rails.has(this.getKey(x + 1, z));
+    rail.hasWest = this.rails.has(this.getKey(x - 1, z));
+  }
+
+  private updateSurroundingRails(x: number, z: number) {
+    const neighbors = [
+      { x: x, z: z - 1 },
+      { x: x, z: z + 1 },
+      { x: x + 1, z: z },
+      { x: x - 1, z: z }
+    ];
+
+    for (const n of neighbors) {
+      if (this.rails.has(this.getKey(n.x, n.z))) {
+        this.updateRailConnections(n.x, n.z);
+        this.createRailVoxelMesh(n.x, n.z);
+      }
+    }
+  }
+
+  private createRailVoxelMesh(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const existing = this.railMeshes.get(key);
+    if (existing) {
+      this.railsGroup.remove(existing);
+      existing.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).geometry.dispose();
+        }
+      });
+      this.railMeshes.delete(key);
+    }
+
+    const rail = this.rails.get(key);
+    if (!rail) return;
+
+    const isWater = this.isWaterTile(x, z);
+    const group = VoxelRailBuilder.buildRailMesh(rail, isWater);
+    this.railsGroup.add(group);
+    this.railMeshes.set(key, group);
+  }
+
+  private findRailPath(startX: number, startZ: number, endX: number, endZ: number): { x: number; z: number }[] | null {
+    const queue: { x: number; z: number; path: { x: number; z: number }[] }[] = [];
+    const visited = new Set<string>();
+
+    queue.push({ x: startX, z: startZ, path: [{ x: startX, z: startZ }] });
+    visited.add(this.getKey(startX, startZ));
+
+    let maxSteps = 260;
+    while (queue.length > 0 && maxSteps-- > 0) {
+      const current = queue.shift()!;
+      if (current.x === endX && current.z === endZ) {
+        return current.path;
+      }
+
+      const curRail = this.rails.get(this.getKey(current.x, current.z));
+      if (!curRail) continue;
+
+      const neighbors: { x: number; z: number; allowed: boolean }[] = [
+        { x: current.x, z: current.z - 1, allowed: curRail.hasNorth },
+        { x: current.x, z: current.z + 1, allowed: curRail.hasSouth },
+        { x: current.x + 1, z: current.z, allowed: curRail.hasEast },
+        { x: current.x - 1, z: current.z, allowed: curRail.hasWest }
+      ];
+
+      for (const n of neighbors) {
+        if (!n.allowed) continue;
+        const key = this.getKey(n.x, n.z);
+        if (this.rails.has(key) && !visited.has(key)) {
+          visited.add(key);
+          queue.push({
+            x: n.x,
+            z: n.z,
+            path: [...current.path, { x: n.x, z: n.z }]
+          });
+        }
+      }
+    }
+    return null;
+  }
+
+  private spawnTrain() {
+    const railList = Array.from(this.rails.values()).filter(r => r.hasNorth || r.hasSouth || r.hasEast || r.hasWest);
+    if (railList.length < 6) return;
+
+    const hasPassengerStation = Array.from(this.services.values()).some(s => s.type === 'station_passenger');
+    const hasFreightStation = Array.from(this.services.values()).some(s => s.type === 'station_freight');
+
+    let trainType: 'passenger' | 'freight' = 'passenger';
+    if (hasPassengerStation && !hasFreightStation) {
+      trainType = 'passenger';
+    } else if (hasFreightStation && !hasPassengerStation) {
+      trainType = 'freight';
+    } else {
+      trainType = Math.random() < 0.5 ? 'passenger' : 'freight';
+    }
+
+    let start = railList[Math.floor(Math.random() * railList.length)];
+    let destination = railList[Math.floor(Math.random() * railList.length)];
+    let attempts = 0;
+    while (Math.hypot(start.x - destination.x, start.z - destination.z) < 5 && attempts++ < 15) {
+      destination = railList[Math.floor(Math.random() * railList.length)];
+    }
+
+    if (start === destination) return;
+
+    for (const t of this.trains) {
+      if (Math.hypot(t.x - (start.x + 0.5), t.z - (start.z + 0.5)) < 3.0) {
+        return;
+      }
+    }
+
+    const path = this.findRailPath(start.x, start.z, destination.x, destination.z);
+    if (!path || path.length < 4) return;
+
+    const startX = path[0].x + 0.5;
+    const startZ = path[0].z + 0.5;
+    const nextTile = path[1];
+    const dx = Math.sign(nextTile.x - path[0].x);
+    const dz = Math.sign(nextTile.z - path[0].z);
+    const initialAngle = Math.atan2(dx, dz);
+
+    const isWater = this.isWaterTile(path[0].x, path[0].z);
+    const trainY = isWater ? 0.16 : 0.04;
+
+    // Locomotive & Carriage Meshes
+    let engineMesh: THREE.Group;
+    const carriages: TrainCarriage[] = [];
+
+    if (trainType === 'passenger') {
+      engineMesh = VoxelRailBuilder.buildPassengerEngine(0x0284c7);
+      const coach1 = VoxelRailBuilder.buildPassengerCarriage(0x0284c7);
+      const coach2 = VoxelRailBuilder.buildPassengerCarriage(0x0284c7);
+
+      coach1.position.set(startX, trainY, startZ);
+      coach1.rotation.y = initialAngle;
+      this.trainsGroup.add(coach1);
+
+      coach2.position.set(startX, trainY, startZ);
+      coach2.rotation.y = initialAngle;
+      this.trainsGroup.add(coach2);
+
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'passenger',
+        color: 0x0284c7,
+        mesh: coach1
+      });
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'passenger',
+        color: 0x0284c7,
+        mesh: coach2
+      });
+    } else {
+      engineMesh = VoxelRailBuilder.buildFreightEngine();
+      const car1 = VoxelRailBuilder.buildCargoFlatcar(0xb91c1c);
+      const car2 = VoxelRailBuilder.buildCargoFlatcar(0x0284c7);
+
+      car1.position.set(startX, trainY, startZ);
+      car1.rotation.y = initialAngle;
+      this.trainsGroup.add(car1);
+
+      car2.position.set(startX, trainY, startZ);
+      car2.rotation.y = initialAngle;
+      this.trainsGroup.add(car2);
+
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'cargo',
+        color: 0xb91c1c,
+        mesh: car1
+      });
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'cargo',
+        color: 0x0284c7,
+        mesh: car2
+      });
+    }
+
+    engineMesh.position.set(startX, trainY, startZ);
+    engineMesh.rotation.y = initialAngle;
+    this.trainsGroup.add(engineMesh);
+
+    const train: TrainAgent = {
+      id: Math.random().toString(),
+      type: trainType,
+      x: startX,
+      z: startZ,
+      y: trainY,
+      tileX: path[0].x,
+      tileZ: path[0].z,
+      fromTileX: path[0].x,
+      fromTileZ: path[0].z,
+      targetTileX: nextTile.x,
+      targetTileZ: nextTile.z,
+      rotationY: initialAngle,
+      speed: 0.042,
+      baseMaxSpeed: trainType === 'passenger' ? 0.048 : 0.038,
+      maxSpeed: trainType === 'passenger' ? 0.048 : 0.038,
+      turn: null,
+      dwellTime: 0,
+      whistleCooldown: 5,
+      carriages,
+      path,
+      pathIndex: 0,
+      trail: [{ x: startX, z: startZ, y: trainY, rotationY: initialAngle, dist: 0 }],
+      totalDist: 0,
+      mesh: engineMesh
+    };
+
+    this.trains.push(train);
+  }
+
+  private extendTrainPath(train: TrainAgent) {
+    if (train.pathIndex >= train.path.length - 1) {
+      const curTile = train.path[train.path.length - 1];
+      const prevTile = train.path.length >= 2 ? train.path[train.path.length - 2] : null;
+
+      const rail = this.rails.get(this.getKey(curTile.x, curTile.z));
+      if (!rail) return;
+
+      const candidates: { x: number; z: number }[] = [];
+      if (rail.hasNorth) candidates.push({ x: curTile.x, z: curTile.z - 1 });
+      if (rail.hasSouth) candidates.push({ x: curTile.x, z: curTile.z + 1 });
+      if (rail.hasEast) candidates.push({ x: curTile.x + 1, z: curTile.z });
+      if (rail.hasWest) candidates.push({ x: curTile.x - 1, z: curTile.z });
+
+      const forwardCandidates = candidates.filter(c => !prevTile || (c.x !== prevTile.x || c.z !== prevTile.z));
+      const chosen = forwardCandidates.length > 0
+        ? forwardCandidates[Math.floor(Math.random() * forwardCandidates.length)]
+        : candidates[0];
+
+      if (chosen) {
+        train.path.push(chosen);
+      } else {
+        train.path.reverse();
+        train.pathIndex = 0;
+      }
+    }
+  }
+
+  private removeTrain(index: number) {
+    const train = this.trains[index];
+    if (!train) return;
+
+    if (train.mesh) {
+      this.trainsGroup.remove(train.mesh);
+      train.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+    }
+    for (const car of train.carriages) {
+      if (car.mesh) {
+        this.trainsGroup.remove(car.mesh);
+        car.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+      }
+    }
+    this.trains.splice(index, 1);
   }
 
   // --- ZONING ---
@@ -1457,6 +1890,29 @@ export class CityWorld {
     }
     this.pedestrians = [];
 
+    // Clear trains
+    for (const train of this.trains) {
+      if (train.mesh) {
+        this.trainsGroup.remove(train.mesh);
+        train.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+      }
+      for (const car of train.carriages) {
+        if (car.mesh) {
+          this.trainsGroup.remove(car.mesh);
+          car.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+        }
+      }
+    }
+    this.trains = [];
+
+    // Clear rails
+    for (const r of this.railMeshes.values()) {
+      this.railsGroup.remove(r);
+      r.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+    }
+    this.railMeshes.clear();
+    this.rails.clear();
+
     // Clear underground pipes
     for (const p of this.pipeMeshes.values()) {
       this.pipesGroup.remove(p);
@@ -1546,6 +2002,11 @@ export class CityWorld {
         wireList.push({ x: w.x, z: w.z });
       }
 
+      const railList: { x: number; z: number }[] = [];
+      for (const r of this.rails.values()) {
+        railList.push({ x: r.x, z: r.z });
+      }
+
       const saveData = {
         version: 1,
         timestamp: Date.now(),
@@ -1553,6 +2014,7 @@ export class CityWorld {
         size: this.size,
         stats: { ...this.stats },
         roads: roadList,
+        rails: railList,
         services: serviceList,
         zones: zoneList,
         buildings: buildingList,
@@ -1591,6 +2053,13 @@ export class CityWorld {
         }
       }
       this.sanitizeBridgesOnLand();
+
+      // Restore Rails
+      if (Array.isArray(data.rails)) {
+        for (const r of data.rails) {
+          this.placeRail(r.x, r.z);
+        }
+      }
 
       // Restore Services
       if (Array.isArray(data.services)) {
@@ -1731,6 +2200,11 @@ export class CityWorld {
       this.updateSurroundingRoads(x, z);
     }
 
+    // Demolish Rail
+    if (this.rails.has(key)) {
+      this.demolishRail(x, z, false);
+    }
+
     // Demolish Zone
     const zMesh = this.zoneMarkers.get(key);
     if (zMesh) {
@@ -1826,6 +2300,14 @@ export class CityWorld {
     if (this.roads.size >= 2 && this.pedestrians.length < allowedPeds) {
       if (Math.random() < 0.35 * this.stats.gameSpeed) {
         this.spawnPedestrian();
+      }
+    }
+
+    // Spawn trains along rail networks
+    const maxTrains = Math.min(Math.floor(this.rails.size / 14) + 1, Math.round(5 * sizeScale));
+    if (this.rails.size >= 6 && this.trains.length < maxTrains) {
+      if (Math.random() < 0.25 * this.stats.gameSpeed) {
+        this.spawnTrain();
       }
     }
 
@@ -2590,7 +3072,33 @@ export class CityWorld {
         }
       }
 
-      // 5. Apply Braking / Acceleration Physics
+      // 5. Level Crossing Yielding:
+      // Road vehicles must ALWAYS stop before railroad tracks if a train is near or crossing!
+      const curCrossing = this.rails.get(this.getKey(curTileX, curTileZ))?.isCrossing;
+      const toCrossing = this.rails.get(this.getKey(car.toTile.x, car.toTile.z))?.isCrossing;
+      if (curCrossing || toCrossing) {
+        const crossingTileX = curCrossing ? curTileX : car.toTile.x;
+        const crossingTileZ = curCrossing ? curTileZ : car.toTile.z;
+        for (const train of this.trains) {
+          const trainDist = Math.hypot(train.x - (crossingTileX + 0.5), train.z - (crossingTileZ + 0.5));
+          let anyCarNear = trainDist < 2.5;
+          if (!anyCarNear) {
+            for (const c of train.carriages) {
+              if (Math.hypot(c.x - (crossingTileX + 0.5), c.z - (crossingTileZ + 0.5)) < 1.6) {
+                anyCarNear = true;
+                break;
+              }
+            }
+          }
+          if (anyCarNear) {
+            desiredSpeed = 0;
+            emergencyBrake = true;
+            break;
+          }
+        }
+      }
+
+      // 6. Apply Braking / Acceleration Physics
       if (emergencyBrake) {
         car.speed = Math.min(car.speed * 0.7, desiredSpeed);
         if (car.speed < 0.002) car.speed = 0;
@@ -2841,6 +3349,246 @@ export class CityWorld {
       if (leftLeg && rightLeg) {
         leftLeg.rotation.x = swing;
         rightLeg.rotation.x = -swing;
+      }
+    }
+
+    // 4. Train Physics & Movement
+    for (let i = this.trains.length - 1; i >= 0; i--) {
+      const train = this.trains[i];
+
+      // Safety check: verify track tile exists
+      const curTileX = Math.floor(train.x);
+      const curTileZ = Math.floor(train.z);
+      const curRail = this.rails.get(this.getKey(curTileX, curTileZ));
+      if (!curRail) {
+        this.removeTrain(i);
+        continue;
+      }
+
+      // Decrement whistle cooldown
+      if (train.whistleCooldown > 0) {
+        train.whistleCooldown -= deltaTime * speedMult;
+      }
+
+      // Station Dwell: pause for passenger boarding or freight loading
+      if (train.dwellTime > 0) {
+        train.dwellTime -= deltaTime * speedMult;
+        // Skip moving while dwelling at station
+        continue;
+      } else if (train.dwellTime <= 0 && train.dwellTime > -30) {
+        train.dwellTime -= deltaTime * speedMult;
+      }
+
+      const trainSpeed = (train.type === 'passenger' ? 0.048 : 0.038) * speedMult * (deltaTime * 60);
+
+      if (train.turn) {
+        const turn = train.turn;
+        turn.progress += trainSpeed / turn.arcLength;
+
+        if (turn.progress < 1.0) {
+          const t = turn.progress;
+          const invT = 1 - t;
+          train.x = invT * invT * turn.pIn.x + 2 * invT * t * turn.p1.x + t * t * turn.pOut.x;
+          train.z = invT * invT * turn.pIn.z + 2 * invT * t * turn.p1.z + t * t * turn.pOut.z;
+          const tanX = 2 * invT * (turn.p1.x - turn.pIn.x) + 2 * t * (turn.pOut.x - turn.p1.x);
+          const tanZ = 2 * invT * (turn.p1.z - turn.pIn.z) + 2 * t * (turn.pOut.z - turn.p1.z);
+          train.rotationY = Math.atan2(tanX, tanZ);
+        } else {
+          // Finish turn: snap to outgoing boundary & heading
+          train.x = turn.pOut.x;
+          train.z = turn.pOut.z;
+          train.rotationY = turn.outHeading;
+          train.fromTileX = train.targetTileX;
+          train.fromTileZ = train.targetTileZ;
+          train.pathIndex++;
+
+          if (train.pathIndex >= train.path.length - 1) {
+            this.extendTrainPath(train);
+          }
+
+          if (train.pathIndex < train.path.length - 1) {
+            const nextP = train.path[train.pathIndex + 1];
+            train.targetTileX = nextP.x;
+            train.targetTileZ = nextP.z;
+          }
+          train.turn = null;
+        }
+      } else {
+        const curTile = train.path[train.pathIndex] || { x: curTileX, z: curTileZ };
+        let nextTile = train.path[train.pathIndex + 1];
+
+        if (!nextTile) {
+          this.extendTrainPath(train);
+          nextTile = train.path[train.pathIndex + 1];
+        }
+
+        if (!nextTile) {
+          // End of line, reverse path
+          train.path.reverse();
+          train.pathIndex = 0;
+          nextTile = train.path[1];
+        }
+
+        if (nextTile) {
+          const dx = Math.sign(nextTile.x - curTile.x);
+          const dz = Math.sign(nextTile.z - curTile.z);
+
+          if (dx === 0 && dz === 0) {
+            train.pathIndex++;
+            continue;
+          }
+
+          // Check if the tile after nextTile requires a 90-degree turn
+          const futureTile = train.path[train.pathIndex + 2];
+          let willTurn = false;
+          let outDx = 0;
+          let outDz = 0;
+
+          if (futureTile) {
+            outDx = Math.sign(futureTile.x - nextTile.x);
+            outDz = Math.sign(futureTile.z - nextTile.z);
+            if ((dx !== 0 && outDz !== 0) || (dz !== 0 && outDx !== 0)) {
+              willTurn = true;
+            }
+          }
+
+          const entryX = nextTile.x + 0.5 - dx * 0.5;
+          const entryZ = nextTile.z + 0.5 - dz * 0.5;
+          const distToEntry = Math.hypot(entryX - train.x, entryZ - train.z);
+
+          if (willTurn && distToEntry <= trainSpeed * 1.5) {
+            // Start parametric Bezier turn
+            const pIn = { x: entryX, z: entryZ };
+            const pOut = { x: nextTile.x + 0.5 + outDx * 0.5, z: nextTile.z + 0.5 + outDz * 0.5 };
+            const p1 = { x: nextTile.x + 0.5, z: nextTile.z + 0.5 };
+            const outHeading = Math.atan2(outDx, outDz);
+
+            train.turn = {
+              pIn,
+              p1,
+              pOut,
+              outHeading,
+              arcLength: (Math.PI / 4) * 0.5,
+              progress: 0
+            };
+            train.targetTileX = nextTile.x;
+            train.targetTileZ = nextTile.z;
+          } else {
+            // Straight track travel
+            const heading = Math.atan2(dx, dz);
+            train.rotationY = heading;
+
+            const targetCenterDist = Math.hypot((nextTile.x + 0.5) - train.x, (nextTile.z + 0.5) - train.z);
+            if (targetCenterDist <= trainSpeed) {
+              train.x = nextTile.x + 0.5;
+              train.z = nextTile.z + 0.5;
+              train.pathIndex++;
+              train.fromTileX = nextTile.x;
+              train.fromTileZ = nextTile.z;
+              if (train.pathIndex < train.path.length - 1) {
+                train.targetTileX = train.path[train.pathIndex + 1].x;
+                train.targetTileZ = train.path[train.pathIndex + 1].z;
+              }
+            } else {
+              train.x += dx * trainSpeed;
+              train.z += dz * trainSpeed;
+            }
+          }
+        }
+      }
+
+      // Track Elevation (Bridge trestle vs surface track)
+      const isWater = this.isWaterTile(Math.floor(train.x), Math.floor(train.z));
+      const targetY = isWater ? 0.16 : 0.04;
+      train.y += (targetY - train.y) * 0.2;
+
+      // Update locomotive 3D mesh
+      train.mesh.position.set(train.x, train.y, train.z);
+      train.mesh.rotation.y = train.rotationY;
+
+      // Station Stopping Check
+      const adjTiles = [
+        this.getKey(curTileX + 1, curTileZ),
+        this.getKey(curTileX - 1, curTileZ),
+        this.getKey(curTileX, curTileZ + 1),
+        this.getKey(curTileX, curTileZ - 1)
+      ];
+      for (const aKey of adjTiles) {
+        const svc = this.services.get(aKey);
+        if (svc) {
+          if (train.type === 'passenger' && svc.type === 'station_passenger') {
+            if (train.dwellTime <= -12) {
+              train.dwellTime = 3.5;
+              this.soundEngine?.playTrainWhistle();
+            }
+          } else if (train.type === 'freight' && svc.type === 'station_freight') {
+            if (train.dwellTime <= -12) {
+              train.dwellTime = 4.0;
+              this.soundEngine?.playTrainWhistle();
+            }
+          }
+        }
+      }
+
+      // Level Crossing Whistle Check
+      if (curRail.isCrossing && train.whistleCooldown <= 0) {
+        this.soundEngine?.playTrainWhistle();
+        train.whistleCooldown = 22;
+      }
+
+      // Record Trail Buffer for Smooth Following Carriages
+      const lastPoint = train.trail[train.trail.length - 1];
+      const deltaMove = lastPoint ? Math.hypot(train.x - lastPoint.x, train.z - lastPoint.z) : 0;
+      train.totalDist += deltaMove;
+
+      if (deltaMove > 0.02 || train.trail.length === 0) {
+        train.trail.push({
+          x: train.x,
+          z: train.z,
+          y: train.y,
+          rotationY: train.rotationY,
+          dist: train.totalDist
+        });
+      }
+
+      // Update Carriages along trail buffer
+      const CARRIAGE_SPACING = 0.82;
+      for (let cIdx = 0; cIdx < train.carriages.length; cIdx++) {
+        const carriage = train.carriages[cIdx];
+        const targetD = train.totalDist - (cIdx + 1) * CARRIAGE_SPACING;
+
+        if (targetD <= 0 || train.trail.length < 2) {
+          carriage.mesh.position.set(train.x, train.y, train.z);
+          carriage.mesh.rotation.y = train.rotationY;
+        } else {
+          // Find adjacent points in trail buffer
+          let p0 = train.trail[0];
+          let p1 = train.trail[1];
+          for (let pIdx = train.trail.length - 1; pIdx >= 1; pIdx--) {
+            if (train.trail[pIdx].dist >= targetD && train.trail[pIdx - 1].dist <= targetD) {
+              p0 = train.trail[pIdx - 1];
+              p1 = train.trail[pIdx];
+              break;
+            }
+          }
+
+          const distSpan = p1.dist - p0.dist || 0.001;
+          const factor = Math.max(0, Math.min(1, (targetD - p0.dist) / distSpan));
+
+          const carX = p0.x + (p1.x - p0.x) * factor;
+          const carZ = p0.z + (p1.z - p0.z) * factor;
+          const carY = p0.y + (p1.y - p0.y) * factor;
+          const carHeading = Math.atan2(p1.x - p0.x, p1.z - p0.z);
+
+          carriage.mesh.position.set(carX, carY, carZ);
+          carriage.mesh.rotation.y = carHeading;
+        }
+      }
+
+      // Prune old trail points beyond maximum carriage distance
+      const maxRetainDist = train.totalDist - (train.carriages.length + 1) * CARRIAGE_SPACING - 1.5;
+      while (train.trail.length > 2 && train.trail[1].dist < maxRetainDist) {
+        train.trail.shift();
       }
     }
   }

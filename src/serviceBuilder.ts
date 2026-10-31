@@ -147,6 +147,28 @@ export const SERVICE_DEFS: Record<ServiceType, ServiceBuildingDef> = {
     happinessBonus: 15,
     icon: '🌲',
     description: 'Beautiful greenery, benches and fountains for citizen leisure'
+  },
+  station_passenger: {
+    id: 'station_passenger',
+    category: 'transport',
+    name: 'Passenger Train Station',
+    cost: 600,
+    upkeep: 30,
+    range: 28,
+    happinessBonus: 15,
+    icon: '🚉',
+    description: 'Central commuter rail terminal with boarding platform, station clock tower & waiting hall'
+  },
+  station_freight: {
+    id: 'station_freight',
+    category: 'transport',
+    name: 'Freight Cargo Depot',
+    cost: 850,
+    upkeep: 45,
+    range: 24,
+    happinessBonus: 5,
+    icon: '🏭',
+    description: 'Industrial intermodal rail terminal with gantry crane, shipping containers & logistics bays'
   }
 };
 
@@ -192,6 +214,12 @@ export class VoxelServiceBuilder {
         break;
       case 'park':
         this.buildPark(group);
+        break;
+      case 'station_passenger':
+        this.buildPassengerStation(group);
+        break;
+      case 'station_freight':
+        this.buildFreightDepot(group);
         break;
     }
 
@@ -701,5 +729,190 @@ export class VoxelServiceBuilder {
       crown.castShadow = true;
       group.add(crown);
     }
+  }
+
+  // --- 8. Passenger Train Station ---
+  private static buildPassengerStation(group: THREE.Group) {
+    const platformMat = new THREE.MeshLambertMaterial({ color: 0x475569 }); // Slate concrete platform
+    const edgeYellowMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 }); // Safety yellow tactile edge
+    const wallBrickMat = new THREE.MeshLambertMaterial({ color: 0x854d0e }); // Heritage red/brown brick
+    const roofSlateMat = new THREE.MeshLambertMaterial({ color: 0x1e293b }); // Dark slate roof
+    const steelMat = new THREE.MeshLambertMaterial({ color: 0x64748b });
+    const glassMat = new THREE.MeshLambertMaterial({ color: 0x93c5fd });
+    const clockMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+    const handMat = new THREE.MeshBasicMaterial({ color: 0x0f172a });
+    const woodMat = new THREE.MeshLambertMaterial({ color: 0x78350f });
+
+    // 1. Raised concrete platform base
+    const platform = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.08, 0.96), platformMat);
+    platform.position.y = 0.04;
+    platform.receiveShadow = true;
+    group.add(platform);
+
+    // Platform yellow warning edge along the track side (front z ~ 0.44)
+    const edge = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.015, 0.06), edgeYellowMat);
+    edge.position.set(0, 0.088, 0.44);
+    group.add(edge);
+
+    // 2. Main Terminal Hall (Rear section)
+    const terminal = new THREE.Mesh(new THREE.BoxGeometry(0.62, 0.48, 0.48), wallBrickMat);
+    terminal.position.set(-0.14, 0.32, -0.20);
+    terminal.castShadow = true;
+    group.add(terminal);
+
+    // Terminal hipped roof
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(0.68, 0.12, 0.54), roofSlateMat);
+    roof.position.set(-0.14, 0.62, -0.20);
+    group.add(roof);
+
+    // Terminal entrance arch / windows
+    const win1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.03), glassMat);
+    win1.position.set(-0.14, 0.22, 0.045);
+    group.add(win1);
+
+    // 3. Iconic Station Clock Tower (Rear-right corner)
+    const tower = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.95, 0.24), wallBrickMat);
+    tower.position.set(0.30, 0.55, -0.22);
+    tower.castShadow = true;
+    group.add(tower);
+
+    // Tower pyramid spire roof
+    const spire = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.32, 4), roofSlateMat);
+    spire.rotation.y = Math.PI / 4;
+    spire.position.set(0.30, 1.18, -0.22);
+    group.add(spire);
+
+    // Clock faces (4 sides of tower top)
+    const clockGeo = new THREE.BoxGeometry(0.12, 0.12, 0.02);
+    const clockF = new THREE.Mesh(clockGeo, clockMat);
+    clockF.position.set(0.30, 0.88, -0.095);
+    group.add(clockF);
+
+    const clockH = new THREE.Mesh(new THREE.BoxGeometry(0.02, 0.05, 0.025), handMat);
+    clockH.position.set(0.30, 0.88, -0.09);
+    group.add(clockH);
+
+    // 4. Passenger Platform Canopy (Pillars + Glass/Steel Awning)
+    const canopyPillars = [-0.35, 0.05];
+    for (const px of canopyPillars) {
+      const col = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.38), steelMat);
+      col.position.set(px, 0.27, 0.18);
+      group.add(col);
+    }
+    const awning = new THREE.Mesh(new THREE.BoxGeometry(0.60, 0.03, 0.32), roofSlateMat);
+    awning.position.set(-0.15, 0.46, 0.18);
+    awning.castShadow = true;
+    group.add(awning);
+
+    // 5. Waiting Benches
+    const bench = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.06, 0.08), woodMat);
+    bench.position.set(-0.15, 0.11, 0.18);
+    group.add(bench);
+  }
+
+  // --- 9. Freight Cargo Depot ---
+  private static buildFreightDepot(group: THREE.Group) {
+    const apronMat = new THREE.MeshLambertMaterial({ color: 0x334155 }); // Dark concrete apron
+    const stripeYellowMat = new THREE.MeshBasicMaterial({ color: 0xfacc15 }); // Hazard stripes
+    const warehouseMat = new THREE.MeshLambertMaterial({ color: 0x475569 }); // Corrugated metal shed
+    const roofMetalMat = new THREE.MeshLambertMaterial({ color: 0x1e293b });
+    const craneYellowMat = new THREE.MeshLambertMaterial({ color: 0xeab308 }); // Heavy gantry yellow
+    const trolleyMat = new THREE.MeshLambertMaterial({ color: 0x0f172a });
+    const rollerDoorMat = new THREE.MeshLambertMaterial({ color: 0x94a3b8 });
+    const containerRed = new THREE.MeshLambertMaterial({ color: 0xd97706 });
+    const containerBlue = new THREE.MeshLambertMaterial({ color: 0x0284c7 });
+    const containerGreen = new THREE.MeshLambertMaterial({ color: 0x16a34a });
+
+    // 1. Reinforced Concrete Cargo Apron Base
+    const apron = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.06, 0.96), apronMat);
+    apron.position.y = 0.03;
+    apron.receiveShadow = true;
+    group.add(apron);
+
+    // Hazard striped loading bay edge
+    const hazard = new THREE.Mesh(new THREE.BoxGeometry(0.96, 0.012, 0.05), stripeYellowMat);
+    hazard.position.set(0, 0.068, 0.44);
+    group.add(hazard);
+
+    // 2. Logistics Warehouse Shed (Left section)
+    const shed = new THREE.Mesh(new THREE.BoxGeometry(0.48, 0.52, 0.72), warehouseMat);
+    shed.position.set(-0.22, 0.32, -0.06);
+    shed.castShadow = true;
+    group.add(shed);
+
+    // Pitched metal roof
+    const roof = new THREE.Mesh(new THREE.BoxGeometry(0.52, 0.08, 0.76), roofMetalMat);
+    roof.position.set(-0.22, 0.60, -0.06);
+    group.add(roof);
+
+    // Rolling shutter cargo doors
+    const roll1 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.28, 0.02), rollerDoorMat);
+    roll1.position.set(-0.22, 0.20, 0.305);
+    group.add(roll1);
+
+    // 3. Heavy Overhead Gantry Crane spanning over the loading pad
+    // Gantry legs (Right section)
+    const legGeo = new THREE.BoxGeometry(0.05, 0.72, 0.05);
+    const leg1 = new THREE.Mesh(legGeo, craneYellowMat);
+    leg1.position.set(0.12, 0.39, -0.36);
+    leg1.castShadow = true;
+    group.add(leg1);
+
+    const leg2 = new THREE.Mesh(legGeo, craneYellowMat);
+    leg2.position.set(0.44, 0.39, -0.36);
+    leg2.castShadow = true;
+    group.add(leg2);
+
+    const leg3 = new THREE.Mesh(legGeo, craneYellowMat);
+    leg3.position.set(0.12, 0.39, 0.36);
+    leg3.castShadow = true;
+    group.add(leg3);
+
+    const leg4 = new THREE.Mesh(legGeo, craneYellowMat);
+    leg4.position.set(0.44, 0.39, 0.36);
+    leg4.castShadow = true;
+    group.add(leg4);
+
+    // Gantry top longitudinal beams
+    const beamL = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.80), craneYellowMat);
+    beamL.position.set(0.12, 0.76, 0);
+    group.add(beamL);
+
+    const beamR = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.06, 0.80), craneYellowMat);
+    beamR.position.set(0.44, 0.76, 0);
+    group.add(beamR);
+
+    // Transverse traveler beam & hoist trolley
+    const travelBeam = new THREE.Mesh(new THREE.BoxGeometry(0.38, 0.05, 0.08), craneYellowMat);
+    travelBeam.position.set(0.28, 0.80, 0.05);
+    group.add(travelBeam);
+
+    const trolley = new THREE.Mesh(new THREE.BoxGeometry(0.10, 0.08, 0.10), trolleyMat);
+    trolley.position.set(0.28, 0.74, 0.05);
+    group.add(trolley);
+
+    // Hoist cable & spreader hook
+    const cable = new THREE.Mesh(new THREE.CylinderGeometry(0.008, 0.008, 0.22), rollerDoorMat);
+    cable.position.set(0.28, 0.60, 0.05);
+    group.add(cable);
+
+    // 4. Stacked Intermodal Shipping Containers
+    // Bottom container (Red)
+    const cRed = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.14, 0.44), containerRed);
+    cRed.position.set(0.28, 0.13, -0.10);
+    cRed.castShadow = true;
+    group.add(cRed);
+
+    // Top stacked container (Blue)
+    const cBlue = new THREE.Mesh(new THREE.BoxGeometry(0.20, 0.14, 0.44), containerBlue);
+    cBlue.position.set(0.28, 0.27, -0.08);
+    cBlue.castShadow = true;
+    group.add(cBlue);
+
+    // Side container (Green)
+    const cGreen = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.14, 0.36), containerGreen);
+    cGreen.position.set(0.28, 0.13, 0.22);
+    cGreen.castShadow = true;
+    group.add(cGreen);
   }
 }

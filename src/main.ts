@@ -5,6 +5,7 @@ import { ROAD_CONFIGS } from './roadBuilder';
 import { SERVICE_DEFS } from './serviceBuilder';
 import { CITY_PLANS } from './cityPlans';
 import { DriveModeController } from './driveMode';
+import { DriveSoundEngine } from './driveSound';
 import type { RoadType, ServiceType, ActiveOverlay, BiomeType } from './types';
 import './style.css';
 
@@ -23,9 +24,10 @@ class GameApp {
   private mouse = new THREE.Vector2();
   private plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
 
-  private currentTool: 'select' | 'road' | 'residential' | 'commercial' | 'industrial' | 'service' | 'move' | 'demolish' | 'pipe' | 'wire' = 'road';
+  private currentTool: 'select' | 'road' | 'rail' | 'residential' | 'commercial' | 'industrial' | 'service' | 'move' | 'demolish' | 'pipe' | 'wire' = 'road';
   public selectedRoadType: RoadType = 'suburban';
   private userExplicitRoadType: boolean = false;
+  public selectedRailType: 'track' | 'station_passenger' | 'station_freight' = 'track';
   public selectedServiceType: ServiceType = 'power_wind';
   private selectedServiceToMove: { x: number; z: number } | null = null;
 
@@ -82,6 +84,7 @@ class GameApp {
     this.scene.add(this.sunLight);
 
     this.world = new CityWorld(this.scene);
+    this.world.soundEngine = new DriveSoundEngine();
     this.controls = new VoxelCameraControls(this.camera, this.renderer.domElement);
     this.driveMode = new DriveModeController(this.world, this.camera, this.scene, this.controls);
 
@@ -229,6 +232,7 @@ class GameApp {
   private setupUI() {
     const toolButtons = document.querySelectorAll<HTMLButtonElement>('.tool-btn');
     const roadSubmenu = document.getElementById('road-submenu');
+    const railSubmenu = document.getElementById('rail-submenu');
     const serviceSubmenu = document.getElementById('service-submenu');
 
     toolButtons.forEach((btn) => {
@@ -241,13 +245,20 @@ class GameApp {
         if (roadSubmenu) {
           roadSubmenu.classList.toggle('visible', this.currentTool === 'road');
         }
+        if (railSubmenu) {
+          railSubmenu.classList.toggle('visible', this.currentTool === 'rail');
+        }
         if (serviceSubmenu) {
           serviceSubmenu.classList.toggle('visible', this.currentTool === 'service');
         }
 
         // Automatic TheoTown underground view mode handling
         const hintText = document.getElementById('hint-text');
-        if (this.currentTool === 'pipe') {
+        if (this.currentTool === 'rail') {
+          if (hintText) {
+            hintText.innerHTML = `🛤️ <b>Rail Network Tool</b>: Lay dual steel tracks ($25). Place Passenger Stations ($600) and Freight Cargo Depots ($850) to run trains!`;
+          }
+        } else if (this.currentTool === 'pipe') {
           this.world.setUndergroundMode(true);
           if (hintText) {
             hintText.innerHTML = `💧 <b>Water Pipeline Tool</b>: Click or drag to lay underground pipes ($5). Connect to Water Towers or Water Tanks to supply fresh water!`;
@@ -288,6 +299,17 @@ class GameApp {
         this.selectedRoadType = (btn.dataset.roadType || 'suburban') as RoadType;
         this.userExplicitRoadType = true;
         this.selectTool('road');
+      });
+    });
+
+    // Rail selection
+    const railTypeButtons = document.querySelectorAll<HTMLButtonElement>('.rail-type-btn');
+    railTypeButtons.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        railTypeButtons.forEach((b) => b.classList.remove('active'));
+        btn.classList.add('active');
+        this.selectedRailType = (btn.dataset.railType || 'track') as any;
+        this.selectTool('rail');
       });
     });
 
@@ -574,6 +596,7 @@ class GameApp {
       if (this.driveMode.isActive) return;
 
       if (e.key === 'r' || e.key === 'R') this.selectTool('road');
+      if (e.key === 'l' || e.key === 'L') this.selectTool('rail');
       if (e.key === 'b' || e.key === 'B') {
         const bridgeBtn = document.querySelector<HTMLButtonElement>('[data-road-type="bridge"]');
         if (bridgeBtn) bridgeBtn.click();
@@ -782,7 +805,8 @@ class GameApp {
         const { x: tileX, z: tileZ } = tile;
         const isValid = this.isActionValid(tileX, tileZ);
         const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
-        this.world.setHighlight(tileX, tileZ, isValid, this.currentTool, explicitType);
+        const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
+        this.world.setHighlight(tileX, tileZ, isValid, highlightTool, explicitType);
 
         if (this.isMouseDown) {
           const tileKey = `${tileX},${tileZ}`;
@@ -846,6 +870,19 @@ class GameApp {
         const cost = ROAD_CONFIGS[effectiveType]?.cost || 20;
         return this.world.stats.money >= cost;
       }
+      if (this.currentTool === 'rail') {
+        if (this.selectedRailType === 'track') {
+          return this.world.stats.money >= 25;
+        }
+        if (this.selectedRailType === 'station_passenger') {
+          if (this.world.isWaterTile(tileX, tileZ)) return false;
+          return this.world.stats.money >= 600;
+        }
+        if (this.selectedRailType === 'station_freight') {
+          if (this.world.isWaterTile(tileX, tileZ)) return false;
+          return this.world.stats.money >= 850;
+        }
+      }
       if (this.currentTool === 'residential' || this.currentTool === 'commercial' || this.currentTool === 'industrial') {
         if (this.world.isWaterTile(tileX, tileZ)) return false;
         return this.world.stats.money >= 10;
@@ -859,6 +896,11 @@ class GameApp {
     if (this.currentTool === 'road') {
       const cost = ROAD_CONFIGS[this.selectedRoadType]?.cost || 20;
       return this.world.stats.money >= cost;
+    }
+    if (this.currentTool === 'rail') {
+      if (this.selectedRailType === 'track') return this.world.stats.money >= 25;
+      if (this.selectedRailType === 'station_passenger') return this.world.stats.money >= 600;
+      if (this.selectedRailType === 'station_freight') return this.world.stats.money >= 850;
     }
     if (this.currentTool === 'service') {
       const cost = SERVICE_DEFS[this.selectedServiceType]?.cost || 100;
@@ -905,6 +947,20 @@ class GameApp {
             roadTypeToPlace = 'suburban';
           }
           this.world.placeRoad(tileX, tileZ, roadTypeToPlace, autoMatch);
+          this.updateUIStats();
+          this.scheduleAutosave();
+          break;
+        }
+        case 'rail': {
+          if (this.selectedRailType === 'track') {
+            this.world.placeRail(tileX, tileZ);
+          } else if (this.selectedRailType === 'station_passenger') {
+            if (this.world.isWaterTile(tileX, tileZ)) return;
+            this.world.placeService(tileX, tileZ, 'station_passenger');
+          } else if (this.selectedRailType === 'station_freight') {
+            if (this.world.isWaterTile(tileX, tileZ)) return;
+            this.world.placeService(tileX, tileZ, 'station_freight');
+          }
           this.updateUIStats();
           this.scheduleAutosave();
           break;

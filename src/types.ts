@@ -4,6 +4,7 @@ export type TileType =
   | 'sand'
   | 'rock'
   | 'road' 
+  | 'rail'
   | 'zone_residential' 
   | 'zone_commercial' 
   | 'zone_industrial'
@@ -18,7 +19,9 @@ export type TileType =
   | 'service_police_station'
   | 'service_fire_station'
   | 'service_hospital'
-  | 'service_park';
+  | 'service_park'
+  | 'service_station_passenger'
+  | 'service_station_freight';
 
 export type BiomeType = 'valley' | 'mountains' | 'desert' | 'coastal' | 'plains';
 
@@ -54,11 +57,13 @@ export type ServiceType =
   | 'police_station'
   | 'fire_station'
   | 'hospital'
-  | 'park';
+  | 'park'
+  | 'station_passenger'
+  | 'station_freight';
 
 export interface ServiceBuildingDef {
   id: ServiceType;
-  category: 'power' | 'water' | 'services' | 'park';
+  category: 'power' | 'water' | 'services' | 'park' | 'transport';
   name: string;
   cost: number;
   upkeep: number;
@@ -108,6 +113,55 @@ export interface RoadTile {
   hasEast: boolean;
   hasWest: boolean;
   elevation: number;
+}
+
+export interface RailTile {
+  x: number;
+  z: number;
+  hasNorth: boolean;
+  hasSouth: boolean;
+  hasEast: boolean;
+  hasWest: boolean;
+  elevation: number;
+  isBridge?: boolean;
+  isCrossing?: boolean; // Road & Rail Grade Crossing
+}
+
+export interface TrainCarriage {
+  x: number;
+  z: number;
+  y: number;
+  rotationY: number;
+  type: 'engine' | 'passenger' | 'cargo';
+  color: number;
+  mesh?: any;
+}
+
+export interface TrainAgent {
+  id: string;
+  type: 'passenger' | 'freight';
+  x: number;
+  z: number;
+  y: number;
+  tileX: number;
+  tileZ: number;
+  fromTileX: number;
+  fromTileZ: number;
+  targetTileX: number;
+  targetTileZ: number;
+  rotationY: number;
+  speed: number;
+  baseMaxSpeed: number;
+  maxSpeed: number;
+  turn: CarTurnState | null;
+  dwellTime: number; // Paused at station (seconds)
+  whistleCooldown: number;
+  carriages: TrainCarriage[];
+  path: { x: number; z: number }[];
+  pathIndex: number;
+  trail: { x: number; z: number; y: number; rotationY: number; dist: number }[];
+  totalDist: number;
+  mesh?: any;
 }
 
 export type VehicleType = 'sedan' | 'sports' | 'suv' | 'bus' | 'truck' | 'police' | 'ambulance' | 'firetruck';
