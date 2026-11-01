@@ -2,6 +2,9 @@ import * as THREE from 'three';
 import type { 
   TileType, 
   RoadTile, 
+  RailTile,
+  TrainCarriage,
+  TrainAgent,
   VoxelBuilding, 
   CarAgent, 
   PedestrianAgent, 
@@ -17,6 +20,7 @@ import type {
 } from './types';
 import { VoxelVehicleBuilder } from './vehicleBuilder';
 import { VoxelRoadBuilder, ROAD_CONFIGS } from './roadBuilder';
+import { VoxelRailBuilder } from './railBuilder';
 import { VoxelServiceBuilder, SERVICE_DEFS } from './serviceBuilder';
 import { VoxelPedestrianBuilder } from './pedestrianBuilder';
 import { VoxelUtilityBuilder } from './utilityBuilder';
@@ -31,13 +35,18 @@ export class CityWorld {
   public overlayGroup: THREE.Group = new THREE.Group();
   public highlightMesh!: THREE.Mesh;
   public roadPreviewGroup: THREE.Group = new THREE.Group();
+  public railPreviewGroup: THREE.Group = new THREE.Group();
   public utilityPreviewGroup: THREE.Group = new THREE.Group();
   public pipesGroup: THREE.Group = new THREE.Group();
   public wiresGroup: THREE.Group = new THREE.Group();
   public coverageGroup: THREE.Group = new THREE.Group();
+  public railsGroup: THREE.Group = new THREE.Group();
+  public trainsGroup: THREE.Group = new THREE.Group();
 
   public tiles: Map<string, TileType> = new Map();
   public roads: Map<string, RoadTile> = new Map();
+  public rails: Map<string, RailTile> = new Map();
+  public railMeshes: Map<string, THREE.Group> = new Map();
   public buildings: Map<string, VoxelBuilding> = new Map();
   public services: Map<string, PlacedService> = new Map();
   public pipes: Map<string, UtilityPipe> = new Map();
@@ -50,6 +59,8 @@ export class CityWorld {
   public isUndergroundMode: boolean = false;
   public cars: CarAgent[] = [];
   public pedestrians: PedestrianAgent[] = [];
+  public trains: TrainAgent[] = [];
+  public soundEngine?: any;
   public playerVehicle?: {
     x: number;
     z: number;
@@ -63,7 +74,11 @@ export class CityWorld {
   public baseTerrainHeights: Map<string, number> = new Map();
   public baseTerrainColors: Map<string, number> = new Map();
 
+  public sceneryGroup: THREE.Group = new THREE.Group();
+  public sceneryObjects: Map<string, THREE.Object3D> = new Map();
+
   public activeOverlay: ActiveOverlay = 'none';
+  public isRestoringSave: boolean = false;
   private animatedServiceParts: any[] = [];
   public streetLightsList: { mesh: THREE.Mesh; light?: THREE.PointLight }[] = [];
   public windowMeshesList: { mesh: THREE.Mesh; originalColor: number }[] = [];
@@ -123,8 +138,11 @@ export class CityWorld {
     this.scene.add(this.servicesGroup);
     this.scene.add(this.carsGroup);
     this.scene.add(this.pedestriansGroup);
+    this.scene.add(this.railsGroup);
+    this.scene.add(this.trainsGroup);
     this.scene.add(this.overlayGroup);
     this.scene.add(this.utilityPreviewGroup);
+    this.scene.add(this.sceneryGroup);
     this.initTerrain();
     this.initHighlight();
   }
@@ -133,14 +151,30 @@ export class CityWorld {
     return `${x},${z}`;
   }
 
-  private initTerrain() {
+  public setMapSize(newSize: number) {
+    if (this.size === newSize && this.groundMesh) return;
+    this.size = newSize;
+
+    if (this.groundMesh) {
+      this.scene.remove(this.groundMesh);
+      this.groundMesh.geometry?.dispose();
+      if (Array.isArray(this.groundMesh.material)) {
+        this.groundMesh.material.forEach((m: any) => m.dispose());
+      } else {
+        this.groundMesh.material?.dispose();
+      }
+    }
+
     const totalTiles = this.size * this.size;
-    const geometry = new THREE.BoxGeometry(1, 0.4, 1);
+    const geometry = new THREE.BoxGeometry(1, 1, 1);
     const material = new THREE.MeshLambertMaterial({ vertexColors: false });
     this.groundMesh = new THREE.InstancedMesh(geometry, material, totalTiles);
     this.groundMesh.receiveShadow = true;
     this.scene.add(this.groundMesh);
+  }
 
+  private initTerrain() {
+    this.setMapSize(this.size || 64);
     this.generateBiome('valley');
   }
 
@@ -148,92 +182,157 @@ export class CityWorld {
   public generateBiome(biome: BiomeType = 'valley') {
     this.currentBiome = biome;
     this.clearAll();
+    this.clearScenery();
     this.baseTerrainTypes.clear();
     this.baseTerrainHeights.clear();
     this.baseTerrainColors.clear();
 
     const half = this.size / 2;
+    const scale = this.size / 64;
     let index = 0;
 
     for (let x = -half; x < half; x++) {
       for (let z = -half; z < half; z++) {
         const key = this.getKey(x, z);
         let tileType: TileType = 'grass';
-        let yPos = -0.2;
+        let topY = 0.0;
         let colorVal = this.COLORS.grass;
 
         switch (biome) {
           case 'valley': {
-            // Winding scenic river flowing across the terrain with sandy shoreline
-            const riverZ = Math.sin(x * 0.18) * 4.2 + Math.cos(x * 0.08) * 1.8;
+            // Winding scenic river flowing along the southern waterfront with sandy shoreline
+            const riverZ = (this.size * 0.12) + Math.sin(x * (0.22 / Math.sqrt(scale))) * (2.2 * Math.sqrt(scale));
             const distToRiver = Math.abs(z - riverZ);
+            const riverW = Math.max(1.5, 1.5 * Math.sqrt(scale));
+            const sandW = riverW + 1.1 * Math.sqrt(scale);
 
-            if (distToRiver <= 1.4) {
+            if (distToRiver <= riverW) {
               tileType = 'water';
-              yPos = -0.27;
+              topY = -0.07;
               colorVal = (Math.sin(x * 0.5) > 0) ? 0x2563eb : 0x3b82f6;
-            } else if (distToRiver <= 2.4) {
+            } else if (distToRiver <= sandW) {
               tileType = 'sand';
-              yPos = -0.22;
+              topY = -0.02;
               colorVal = (Math.cos(x * 0.4) > 0) ? 0xd4b878 : 0xe5d08f;
             } else {
               tileType = 'grass';
-              yPos = -0.2 + (Math.sin(x * 0.3) + Math.cos(z * 0.3)) * 0.03;
+              topY = (Math.sin(x * 0.3) + Math.cos(z * 0.3)) * 0.02;
               colorVal = ((x + z) % 2 === 0) ? this.COLORS.grass : this.COLORS.grassDark;
             }
             break;
           }
 
           case 'mountains': {
-            // Rocky high ridges with central accessible mountain pass and alpine lake
-            const passDist = Math.abs(z - x * 0.4);
-            const rawH = (Math.sin(x * 0.22) * Math.cos(z * 0.22)) * 0.45 + Math.sin(x * 0.45 + z * 0.35) * 0.18;
-            const h = passDist < 3.8 ? Math.min(rawH, 0.04) : rawH;
+            // Central & Southwest Alpine Valley
+            const distValley = Math.hypot((x + 2 * scale) * 0.85, (z - 4 * scale) * 1.15) / scale;
+            // High mountain pass winding north
+            const passCenter = (4.0 * scale) + Math.sin(z * (0.3 / Math.sqrt(scale))) * (1.5 * scale);
+            const isPass = z <= 0 && Math.abs(x - passCenter) < (2.2 * Math.sqrt(scale));
 
-            // Mountain alpine crater lake in one corner
-            const lakeDist = Math.hypot(x + 8, z - 7);
+            // Alpine Glacial Tarn Cirque Lake (Northwest)
+            const lakeDist = Math.hypot(x + 8 * scale, z + 9 * scale) / scale;
+            // Mountain stream tumbling down from the tarn
+            const streamX = Math.round(-7 * scale);
+            const isStream = Math.abs(x - streamX) <= Math.max(0, Math.floor(scale * 0.5)) && z >= (-7 * scale) && z <= (-2 * scale);
 
-            if (lakeDist < 2.5) {
+            if (lakeDist < 2.2) {
               tileType = 'water';
-              yPos = -0.25;
-              colorVal = 0x0284c7;
-            } else if (h > 0.36) {
-              tileType = 'rock';
-              yPos = -0.2 + h;
-              colorVal = 0xf8fafc; // Snow peak
-            } else if (h > 0.14) {
-              tileType = 'rock';
-              yPos = -0.2 + h;
-              colorVal = (Math.sin(x * 0.6) > 0) ? 0x64748b : 0x475569; // Granite / slate
+              topY = 0.50; // High mountain glacial tarn nestled in granite cirque
+              colorVal = (Math.sin(x * 0.5) > 0) ? 0x0284c7 : 0x0ea5e9;
+            } else if (lakeDist < 2.9) {
+              tileType = 'sand';
+              topY = 0.58; // Pebble/gravel tarn beach
+              colorVal = 0x94a3b8;
+            } else if (isStream) {
+              tileType = 'water';
+              topY = (z <= (-5 * scale) ? 0.35 : 0.0) - 0.07;
+              colorVal = 0x38bdf8;
             } else {
-              tileType = 'grass';
-              yPos = -0.2 + Math.max(0, h);
-              colorVal = (Math.sin(z * 0.5) > 0) ? 0x2d4f1c : 0x3e6b27; // Alpine pine meadow
+              // Mountain Massif Envelopes framed along northern & eastern edges
+              const normZ = z / half;
+              const normX = x / half;
+              const massifN = Math.max(0, -normZ - 0.05) ** 0.85 * Math.max(0, 1.0 - normX * 0.7);
+              const massifE = Math.max(0, normX - 0.08) ** 0.9 * Math.max(0, 1.0 - normZ * 0.65);
+              const massifS = Math.max(0, normZ - 0.32) * Math.max(0, -normX - 0.05) * 0.75;
+              const baseEnvelope = Math.max(massifN, massifE, massifS);
+
+              // Multi-octave fractal ridge noise (arêtes and jagged crests)
+              const r1 = 1.0 - Math.abs(Math.sin(x * 0.28 + z * 0.20 + 0.8) * Math.cos(z * 0.25 - x * 0.16));
+              const r2 = 1.0 - Math.abs(Math.sin(x * 0.55 - z * 0.42 + 1.2) * Math.sin(z * 0.50 + x * 0.32));
+              const r3 = Math.sin(x * 0.9 + z * 0.75) * Math.cos(x * 0.75 - z * 0.9) * 0.35;
+
+              let rawH = baseEnvelope * ((r1 ** 1.8) * 1.75 + r2 * 0.85 + r3);
+
+              // Prominent Mountain Horn Summits
+              const distHorn = Math.hypot(x + 8 * scale, z + 12 * scale) / scale;
+              rawH += Math.max(0, 1.0 - distHorn / 4.8) ** 2 * 1.4;
+              const distSpire = Math.hypot(x - 12 * scale, z + 7 * scale) / scale;
+              rawH += Math.max(0, 1.0 - distSpire / 4.5) ** 2 * 1.2;
+
+              // Valley basin & pass protection for city construction
+              if (distValley < 5.8 || isPass) {
+                rawH = Math.min(rawH, isPass ? 0.35 : 0.15);
+              }
+
+              // Quantized discrete voxel tiers & geological strata
+              if (rawH < 0.28) {
+                // Tier 0: Valley floor (lush buildable meadows)
+                tileType = 'grass';
+                topY = 0.0;
+                colorVal = ((x + z) % 2 === 0) ? 0x3e6b27 : 0x2d4f1c;
+              } else if (rawH < 0.75) {
+                // Tier 1: Alpine foothills & spruce plateaus
+                tileType = 'grass';
+                topY = 0.40;
+                colorVal = ((x + z) % 2 === 0) ? 0x365314 : 0x3f6212;
+              } else if (rawH < 1.30) {
+                // Tier 2: Granite cliffs & rocky shelves
+                tileType = 'rock';
+                topY = 0.90;
+                colorVal = (Math.sin(x * 0.7 + z * 0.4) > 0) ? 0x64748b : 0x52525b;
+              } else if (rawH < 1.85) {
+                // Tier 3: High mountain crags & jagged slate
+                tileType = 'rock';
+                topY = 1.45;
+                colorVal = (Math.cos(x * 0.5 - z * 0.6) > 0) ? 0x475569 : 0x334155;
+              } else if (rawH < 2.35) {
+                // Tier 4: Sub-peak snowline & frosted granite
+                tileType = 'rock';
+                topY = 2.05;
+                colorVal = ((x + z) % 2 === 0) ? 0xe2e8f0 : 0xcfd8dc;
+              } else {
+                // Tier 5: Majestic summit snow peaks & horns
+                tileType = 'rock';
+                topY = (rawH > 2.65 ? 2.90 : 2.60);
+                colorVal = (rawH > 2.6) ? 0xffffff : 0xf8fafc;
+              }
             }
             break;
           }
 
           case 'desert': {
-            // Golden sand dunes, sandstone canyon cliffs and central emerald oasis
-            const oasisDist = Math.hypot(x - 1, z + 2);
-            const isCanyonMesa = (x > 7 && z > 6) || (x < -8 && z < -7);
-            const dune = Math.sin(x * 0.35 + z * 0.15) * 0.05 + Math.cos(z * 0.4) * 0.04;
+            // Golden sand dunes, sandstone canyon cliffs and emerald oasis
+            const oasisDist = Math.hypot(x - 10 * scale, z + 10 * scale);
+            const isCanyonMesa = (x > (11 * scale) && z > (10 * scale)) || (x < (-12 * scale) && z < (-11 * scale));
+            const dune = Math.sin(x * 0.35 + z * 0.15) * 0.03 + Math.cos(z * 0.4) * 0.02;
+            const oasisR = 2.2 * Math.sqrt(scale);
+            const oasisGreeneryR = 3.6 * Math.sqrt(scale);
 
-            if (oasisDist < 2.0) {
+            if (oasisDist < oasisR) {
               tileType = 'water';
-              yPos = -0.26;
+              topY = -0.06;
               colorVal = 0x06b6d4; // Turquoise oasis spring
-            } else if (oasisDist < 3.6) {
+            } else if (oasisDist < oasisGreeneryR) {
               tileType = 'grass';
-              yPos = -0.21;
+              topY = -0.01;
               colorVal = 0x15803d; // Oasis palm greenery
             } else if (isCanyonMesa) {
               tileType = 'rock';
-              yPos = -0.2 + 0.24;
+              topY = 0.55;
               colorVal = ((x + z) % 2 === 0) ? 0xb45309 : 0x9a3412; // Terraced red sandstone
             } else {
               tileType = 'sand';
-              yPos = -0.2 + dune;
+              topY = dune;
               const sandPalette = [0xf59e0b, 0xeab308, 0xd97706, 0xfde047];
               colorVal = sandPalette[Math.abs(x + z * 3) % sandPalette.length];
             }
@@ -242,22 +341,26 @@ export class CityWorld {
 
           case 'coastal': {
             // Central tropical island surrounded by ocean waters & sandy beaches
-            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.35) * 2.2 + Math.cos(z * 0.35) * 2.2;
-            if (islandRadius > 10.5) {
+            const islandRadius = Math.hypot(x, z) + Math.sin(x * 0.3) * (1.5 * scale) + Math.cos(z * 0.3) * (1.5 * scale);
+            const rOcean = half * 0.48;
+            const rCoast = half * 0.42;
+            const rBeach = half * 0.36;
+
+            if (islandRadius > rOcean) {
               tileType = 'water';
-              yPos = -0.28;
+              topY = -0.08;
               colorVal = 0x0284c7; // Deep ocean
-            } else if (islandRadius > 8.5) {
+            } else if (islandRadius > rCoast) {
               tileType = 'water';
-              yPos = -0.25;
+              topY = -0.05;
               colorVal = 0x38bdf8; // Shallow coastal waters
-            } else if (islandRadius > 7.0) {
+            } else if (islandRadius > rBeach) {
               tileType = 'sand';
-              yPos = -0.21;
+              topY = -0.01;
               colorVal = ((x + z) % 2 === 0) ? 0xfef08a : 0xfde047; // Beach
             } else {
               tileType = 'grass';
-              yPos = -0.2;
+              topY = 0.0;
               colorVal = ((x + z) % 2 === 0) ? 0x22c55e : 0x16a34a; // Tropical island interior
             }
             break;
@@ -265,19 +368,20 @@ export class CityWorld {
 
           case 'plains':
           default: {
-            // Wide open fertile flatlands with scenic pond, ideal for sprawling cities
-            const pondDist = Math.hypot(x + 6, z - 6);
-            if (pondDist < 2.5) {
+            // Wide open fertile flatlands with corner pond, ideal for sprawling cities
+            const pondDist = Math.hypot(x - half * 0.35, z + half * 0.35);
+            const pondR = 2.8 * Math.sqrt(scale);
+            if (pondDist < pondR) {
               tileType = 'water';
-              yPos = -0.26;
+              topY = -0.06;
               colorVal = 0x3b82f6;
-            } else if (pondDist < 3.4) {
+            } else if (pondDist < pondR + 1.0) {
               tileType = 'sand';
-              yPos = -0.22;
+              topY = -0.02;
               colorVal = 0xd4b878;
             } else {
               tileType = 'grass';
-              yPos = -0.2;
+              topY = 0.0;
               colorVal = ((x + z) % 2 === 0) ? 0x65a30d : 0x4d7c0f;
             }
             break;
@@ -285,19 +389,50 @@ export class CityWorld {
         }
 
         this.baseTerrainTypes.set(key, tileType);
-        this.baseTerrainHeights.set(key, yPos);
+        this.baseTerrainHeights.set(key, topY);
         this.baseTerrainColors.set(key, colorVal);
         this.tiles.set(key, tileType);
 
-        // Update ground mesh instance matrix and color
-        this.dummy.position.set(x + 0.5, yPos, z + 0.5);
-        this.dummy.scale.set(0.98, 1, 0.98);
-        this.dummy.updateMatrix();
-        this.groundMesh.setMatrixAt(index, this.dummy.matrix);
-
-        const color = new THREE.Color(colorVal);
-        this.groundMesh.setColorAt(index, color);
+        // Update ground mesh instance matrix and color with solid anchored bedrock
+        this.setGroundTileTransform(x, z, topY, colorVal);
         index++;
+
+        // Add procedural 3D scenery (trees & boulders) for mountain biome
+        if (biome === 'mountains' && tileType !== 'water') {
+          const hash = Math.abs(Math.sin(x * 12.9898 + z * 78.233) * 43758.5453) % 1;
+          if (tileType === 'grass' && topY <= 0.40) {
+            // Foothills & valley pine trees
+            if (hash < 0.16) {
+              const tree = this.buildVoxelPineTree(false);
+              tree.position.set(x + 0.5, topY, z + 0.5);
+              this.sceneryGroup.add(tree);
+              this.sceneryObjects.set(key, tree);
+            }
+          } else if (tileType === 'rock' && topY >= 0.85 && topY <= 1.05) {
+            // Tier 2 granite shelves
+            if (hash < 0.14) {
+              if (hash < 0.07) {
+                const tree = this.buildVoxelPineTree(true); // Snow-dusted pine
+                tree.position.set(x + 0.5, topY, z + 0.5);
+                this.sceneryGroup.add(tree);
+                this.sceneryObjects.set(key, tree);
+              } else {
+                const rock = this.buildVoxelBoulder(Math.floor(hash * 10));
+                rock.position.set(x + 0.5, topY, z + 0.5);
+                this.sceneryGroup.add(rock);
+                this.sceneryObjects.set(key, rock);
+              }
+            }
+          } else if (tileType === 'rock' && topY >= 1.35 && topY <= 1.65) {
+            // Tier 3 high crags
+            if (hash < 0.12) {
+              const rock = this.buildVoxelBoulder(Math.floor(hash * 10));
+              rock.position.set(x + 0.5, topY, z + 0.5);
+              this.sceneryGroup.add(rock);
+              this.sceneryObjects.set(key, rock);
+            }
+          }
+        }
       }
     }
 
@@ -323,6 +458,9 @@ export class CityWorld {
 
     this.roadPreviewGroup.visible = false;
     this.scene.add(this.roadPreviewGroup);
+
+    this.railPreviewGroup.visible = false;
+    this.scene.add(this.railPreviewGroup);
   }
 
   public setHighlight(
@@ -332,9 +470,13 @@ export class CityWorld {
     tool: string = 'road', 
     explicitRoadType?: RoadType
   ) {
+    const key = this.getKey(x, z);
+    const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+
     if (tool === 'road') {
       this.highlightMesh.visible = false;
       this.utilityPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
 
       // Clear previous road preview
       this.roadPreviewGroup.clear();
@@ -346,8 +488,19 @@ export class CityWorld {
       const west = this.roads.get(this.getKey(x - 1, z));
 
       // Auto-detect matching road type if user hasn't explicitly overridden
-      const autoType = north?.type || south?.type || east?.type || west?.type || 'suburban';
-      const effectiveType = explicitRoadType || autoType;
+      const isWater = this.isWaterTile(x, z);
+      let autoType: RoadType = 'suburban';
+      if (isWater) {
+        autoType = 'bridge';
+      } else {
+        const nonBridge = [north?.type, south?.type, east?.type, west?.type].find((t): t is RoadType => !!t && t !== 'bridge');
+        autoType = nonBridge || 'suburban';
+      }
+
+      let effectiveType: RoadType = explicitRoadType || autoType;
+      if (!isWater && effectiveType === 'bridge' && !explicitRoadType) {
+        effectiveType = 'suburban';
+      }
 
       let hasNorth = !!north;
       let hasSouth = !!south;
@@ -369,22 +522,57 @@ export class CityWorld {
         valid
       );
 
-      this.roadPreviewGroup.position.set(x + 0.5, 0, z + 0.5);
+      this.roadPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
       this.roadPreviewGroup.add(previewMesh);
       this.roadPreviewGroup.visible = true;
+    } else if (tool === 'rail') {
+      this.highlightMesh.visible = false;
+      this.roadPreviewGroup.visible = false;
+      this.utilityPreviewGroup.visible = false;
+
+      this.railPreviewGroup.clear();
+
+      const north = this.rails.has(this.getKey(x, z - 1));
+      const south = this.rails.has(this.getKey(x, z + 1));
+      const east = this.rails.has(this.getKey(x + 1, z));
+      const west = this.rails.has(this.getKey(x - 1, z));
+
+      let hasNorth = north;
+      let hasSouth = south;
+      let hasEast = east;
+      let hasWest = west;
+
+      if (!hasNorth && !hasSouth && !hasEast && !hasWest) {
+        hasEast = true;
+        hasWest = true;
+      }
+
+      const previewMesh = VoxelRailBuilder.buildRailPreviewMesh(
+        hasNorth,
+        hasSouth,
+        hasEast,
+        hasWest,
+        valid
+      );
+
+      this.railPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
+      this.railPreviewGroup.add(previewMesh);
+      this.railPreviewGroup.visible = true;
     } else if (tool === 'pipe' || tool === 'wire') {
       this.roadPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
       this.highlightMesh.visible = false;
 
       this.utilityPreviewGroup.clear();
       const preview = VoxelUtilityBuilder.buildCursorCoveragePreview(tool, 4);
       this.utilityPreviewGroup.add(preview);
-      this.utilityPreviewGroup.position.set(x + 0.5, 0, z + 0.5);
+      this.utilityPreviewGroup.position.set(x + 0.5, topY, z + 0.5);
       this.utilityPreviewGroup.visible = true;
     } else {
       this.roadPreviewGroup.visible = false;
+      this.railPreviewGroup.visible = false;
       this.utilityPreviewGroup.visible = false;
-      this.highlightMesh.position.set(x + 0.5, 0.05, z + 0.5);
+      this.highlightMesh.position.set(x + 0.5, topY + 0.05, z + 0.5);
 
       let color = valid ? 0xffffff : 0xef4444;
       if (valid) {
@@ -403,6 +591,7 @@ export class CityWorld {
   public clearHighlight() {
     this.highlightMesh.visible = false;
     this.roadPreviewGroup.visible = false;
+    this.railPreviewGroup.visible = false;
     this.utilityPreviewGroup.visible = false;
   }
 
@@ -410,11 +599,153 @@ export class CityWorld {
     return this.tiles.get(this.getKey(x, z)) || 'grass';
   }
 
+  public isWaterTile(x: number, z: number): boolean {
+    const key = this.getKey(x, z);
+    const baseType = this.baseTerrainTypes.get(key);
+    const tileType = this.tiles.get(key);
+    return baseType === 'water' || tileType === 'water';
+  }
+
+  public setGroundTileTransform(x: number, z: number, topY: number, colorVal?: number) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    const index = (x + half) * this.size + (z + half);
+    const bedrock = -0.6;
+    const height = Math.max(0.08, topY - bedrock);
+    const centerY = bedrock + height / 2;
+
+    this.dummy.position.set(x + 0.5, centerY, z + 0.5);
+    this.dummy.scale.set(0.98, height, 0.98);
+    this.dummy.updateMatrix();
+    this.groundMesh.setMatrixAt(index, this.dummy.matrix);
+    this.groundMesh.instanceMatrix.needsUpdate = true;
+
+    if (colorVal !== undefined) {
+      this.groundMesh.setColorAt(index, new THREE.Color(colorVal));
+      if (this.groundMesh.instanceColor) {
+        this.groundMesh.instanceColor.needsUpdate = true;
+      }
+    }
+  }
+
+  public setGroundTileFoundation(x: number, z: number, topY: number = 0.0) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    this.removeSceneryAt(x, z);
+    const effectiveTop = (topY <= 0.001) ? 0.0 : topY;
+    this.setGroundTileTransform(x, z, effectiveTop);
+  }
+
+  public restoreGroundTile(x: number, z: number) {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+    const key = this.getKey(x, z);
+    const topY = this.baseTerrainHeights.get(key) ?? 0.0;
+    const colorVal = this.baseTerrainColors.get(key) ?? this.COLORS.grass;
+    this.setGroundTileTransform(x, z, topY, colorVal);
+  }
+
+  public ensureLandTile(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return;
+
+    this.removeSceneryAt(x, z);
+    this.baseTerrainTypes.set(key, 'grass');
+    this.baseTerrainHeights.set(key, 0.0);
+    const grassColor = ((x + z) % 2 === 0) ? this.COLORS.grass : this.COLORS.grassDark;
+    this.baseTerrainColors.set(key, grassColor);
+    if (this.tiles.get(key) === 'water' || this.tiles.get(key) === 'sand' || this.tiles.get(key) === 'rock') {
+      this.tiles.set(key, 'grass');
+    }
+
+    this.setGroundTileTransform(x, z, 0.0, grassColor);
+  }
+
+  public removeSceneryAt(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const obj = this.sceneryObjects.get(key);
+    if (obj) {
+      this.sceneryGroup.remove(obj);
+      obj.traverse((child: any) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+        }
+      });
+      this.sceneryObjects.delete(key);
+    }
+  }
+
+  public clearScenery() {
+    for (const obj of this.sceneryObjects.values()) {
+      this.sceneryGroup.remove(obj);
+      obj.traverse((child: any) => {
+        if (child.isMesh) {
+          child.geometry?.dispose();
+        }
+      });
+    }
+    this.sceneryObjects.clear();
+  }
+
+  private buildVoxelPineTree(snowDusted: boolean = false): THREE.Group {
+    const group = new THREE.Group();
+    const trunkMat = new THREE.MeshLambertMaterial({ color: 0x3e2723 });
+    const trunk = new THREE.Mesh(new THREE.BoxGeometry(0.08, 0.35, 0.08), trunkMat);
+    trunk.position.y = 0.175;
+    trunk.castShadow = true;
+    group.add(trunk);
+
+    const leafMat1 = new THREE.MeshLambertMaterial({ color: 0x14532d });
+    const skirt1 = new THREE.Mesh(new THREE.BoxGeometry(0.42, 0.22, 0.42), leafMat1);
+    skirt1.position.y = 0.28;
+    skirt1.castShadow = true;
+    group.add(skirt1);
+
+    const leafMat2 = new THREE.MeshLambertMaterial({ color: 0x166534 });
+    const skirt2 = new THREE.Mesh(new THREE.BoxGeometry(0.30, 0.20, 0.30), leafMat2);
+    skirt2.position.y = 0.44;
+    skirt2.castShadow = true;
+    group.add(skirt2);
+
+    const leafMat3 = new THREE.MeshLambertMaterial({ color: 0x15803d });
+    const skirt3 = new THREE.Mesh(new THREE.BoxGeometry(0.18, 0.22, 0.18), leafMat3);
+    skirt3.position.y = 0.58;
+    skirt3.castShadow = true;
+    group.add(skirt3);
+
+    if (snowDusted) {
+      const snowMat = new THREE.MeshLambertMaterial({ color: 0xffffff });
+      const snowCap = new THREE.Mesh(new THREE.BoxGeometry(0.14, 0.08, 0.14), snowMat);
+      snowCap.position.y = 0.68;
+      group.add(snowCap);
+    }
+    return group;
+  }
+
+  private buildVoxelBoulder(type: number = 0): THREE.Group {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshLambertMaterial({ color: (type % 2 === 0) ? 0x64748b : 0x52525b });
+    const rock1 = new THREE.Mesh(new THREE.BoxGeometry(0.26, 0.20, 0.24), mat);
+    rock1.position.y = 0.10;
+    rock1.castShadow = true;
+    group.add(rock1);
+
+    const rock2 = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.14, 0.16), mat);
+    rock2.position.set(0.10, 0.07, -0.08);
+    rock2.castShadow = true;
+    group.add(rock2);
+
+    group.rotation.y = type * 1.1;
+    return group;
+  }
+
   // --- ROAD PLACEMENT ---
   public placeRoad(x: number, z: number, roadType: RoadType = 'suburban', autoMatch: boolean = false): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
     const existingRoad = this.roads.get(key);
+    const isWater = this.isWaterTile(x, z);
 
     let effectiveType = roadType;
     if (autoMatch) {
@@ -426,9 +757,27 @@ export class CityWorld {
       ];
       for (const n of neighbors) {
         if (n && n.type) {
+          // If on land, never match a bridge neighbor!
+          if (!isWater && n.type === 'bridge') {
+            continue;
+          }
           effectiveType = n.type;
           break;
         }
+      }
+    }
+
+    // Water Crossing Rules: Only Bridges can traverse water, and Bridges can ONLY exist over water!
+    if (isWater) {
+      if (effectiveType !== 'bridge' && autoMatch) {
+        effectiveType = 'bridge';
+      } else if (effectiveType !== 'bridge') {
+        return false;
+      }
+    } else {
+      // Land tiles cannot have water bridges
+      if (effectiveType === 'bridge') {
+        effectiveType = (roadType !== 'bridge') ? roadType : 'suburban';
       }
     }
 
@@ -437,13 +786,22 @@ export class CityWorld {
     }
 
     const cost = ROAD_CONFIGS[effectiveType]?.cost || 20;
-    if (this.stats.money < cost) return false;
-    this.stats.money -= cost;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
+    const hadRail = this.rails.get(key);
     this.demolish(x, z, false);
+    if (hadRail) {
+      hadRail.isCrossing = true;
+      this.rails.set(key, hadRail);
+      this.createRailVoxelMesh(x, z);
+    }
 
     const config = ROAD_CONFIGS[effectiveType] || ROAD_CONFIGS.suburban;
     this.tiles.set(key, 'road');
+    if (!isWater) {
+      this.setGroundTileFoundation(x, z, 0.0);
+    }
     this.roads.set(key, {
       x,
       z,
@@ -460,6 +818,25 @@ export class CityWorld {
     this.createRoadVoxelMesh(x, z);
 
     return true;
+  }
+
+  public sanitizeBridgesOnLand(): number {
+    const toFix: { x: number; z: number }[] = [];
+    for (const r of this.roads.values()) {
+      if (r.type === 'bridge' && !this.isWaterTile(r.x, r.z)) {
+        toFix.push({ x: r.x, z: r.z });
+      }
+    }
+    if (toFix.length === 0) return 0;
+
+    const prevRestoring = this.isRestoringSave;
+    this.isRestoringSave = true;
+    for (const pos of toFix) {
+      this.demolish(pos.x, pos.z, false);
+      this.placeRoad(pos.x, pos.z, 'suburban', false);
+    }
+    this.isRestoringSave = prevRestoring;
+    return toFix.length;
   }
 
   private updateRoadConnections(x: number, z: number) {
@@ -511,17 +888,392 @@ export class CityWorld {
     this.roadMeshes.set(key, group);
   }
 
+  // --- RAIL NETWORK (Tracks, Switches, Level Crossings & Trains) ---
+  public placeRail(x: number, z: number): boolean {
+    const half = this.size / 2;
+    if (x < -half || x >= half || z < -half || z >= half) return false;
+    const key = this.getKey(x, z);
+    if (this.rails.has(key)) return true;
+
+    // Rail Track Cost: $25
+    if (!this.isRestoringSave && this.stats.money < 25) return false;
+
+    const isWater = this.isWaterTile(x, z);
+    const existingRoad = this.roads.get(key);
+
+    // Buildings and services block tracks (unless demolished first)
+    if (this.buildings.has(key)) return false;
+    if (this.services.has(key)) return false;
+
+    if (!this.isRestoringSave) {
+      this.stats.money -= 25;
+    }
+
+    const isCrossing = !!existingRoad;
+    const isBridge = isWater;
+    const elevation = isBridge ? 0.16 : 0.04;
+
+    const railTile: RailTile = {
+      x,
+      z,
+      hasNorth: false,
+      hasSouth: false,
+      hasEast: false,
+      hasWest: false,
+      elevation,
+      isBridge,
+      isCrossing
+    };
+
+    this.rails.set(key, railTile);
+    if (!existingRoad) {
+      this.tiles.set(key, 'rail');
+      if (!isWater) {
+        this.setGroundTileFoundation(x, z, 0.0);
+      }
+    }
+
+    this.updateRailConnections(x, z);
+    this.updateSurroundingRails(x, z);
+    this.createRailVoxelMesh(x, z);
+
+    if (existingRoad) {
+      this.createRoadVoxelMesh(x, z);
+    }
+
+    return true;
+  }
+
+  public demolishRail(x: number, z: number, refund: boolean = true): boolean {
+    const key = this.getKey(x, z);
+    const rail = this.rails.get(key);
+    if (!rail) return false;
+
+    if (refund) {
+      this.stats.money += 10;
+    }
+
+    const mesh = this.railMeshes.get(key);
+    if (mesh) {
+      this.railsGroup.remove(mesh);
+      mesh.traverse((c: any) => { if (c.isMesh) c.geometry?.dispose(); });
+      this.railMeshes.delete(key);
+    }
+
+    this.rails.delete(key);
+
+    const existingRoad = this.roads.get(key);
+    if (existingRoad) {
+      this.createRoadVoxelMesh(x, z);
+    } else {
+      const baseType = this.baseTerrainTypes.get(key) || 'grass';
+      this.tiles.set(key, baseType);
+    }
+
+    this.updateSurroundingRails(x, z);
+
+    // Remove any train that was on this track
+    for (let i = this.trains.length - 1; i >= 0; i--) {
+      const train = this.trains[i];
+      if (Math.floor(train.x) === x && Math.floor(train.z) === z) {
+        this.removeTrain(i);
+      }
+    }
+
+    return true;
+  }
+
+  private updateRailConnections(x: number, z: number) {
+    const rail = this.rails.get(this.getKey(x, z));
+    if (!rail) return;
+
+    rail.hasNorth = this.rails.has(this.getKey(x, z - 1));
+    rail.hasSouth = this.rails.has(this.getKey(x, z + 1));
+    rail.hasEast = this.rails.has(this.getKey(x + 1, z));
+    rail.hasWest = this.rails.has(this.getKey(x - 1, z));
+  }
+
+  private updateSurroundingRails(x: number, z: number) {
+    const neighbors = [
+      { x: x, z: z - 1 },
+      { x: x, z: z + 1 },
+      { x: x + 1, z: z },
+      { x: x - 1, z: z }
+    ];
+
+    for (const n of neighbors) {
+      if (this.rails.has(this.getKey(n.x, n.z))) {
+        this.updateRailConnections(n.x, n.z);
+        this.createRailVoxelMesh(n.x, n.z);
+      }
+    }
+  }
+
+  private createRailVoxelMesh(x: number, z: number) {
+    const key = this.getKey(x, z);
+    const existing = this.railMeshes.get(key);
+    if (existing) {
+      this.railsGroup.remove(existing);
+      existing.traverse((child) => {
+        if ((child as THREE.Mesh).isMesh) {
+          (child as THREE.Mesh).geometry.dispose();
+        }
+      });
+      this.railMeshes.delete(key);
+    }
+
+    const rail = this.rails.get(key);
+    if (!rail) return;
+
+    const isWater = this.isWaterTile(x, z);
+    const group = VoxelRailBuilder.buildRailMesh(rail, isWater);
+    this.railsGroup.add(group);
+    this.railMeshes.set(key, group);
+  }
+
+  private findRailPath(startX: number, startZ: number, endX: number, endZ: number): { x: number; z: number }[] | null {
+    const queue: { x: number; z: number; path: { x: number; z: number }[] }[] = [];
+    const visited = new Set<string>();
+
+    queue.push({ x: startX, z: startZ, path: [{ x: startX, z: startZ }] });
+    visited.add(this.getKey(startX, startZ));
+
+    let maxSteps = 260;
+    while (queue.length > 0 && maxSteps-- > 0) {
+      const current = queue.shift()!;
+      if (current.x === endX && current.z === endZ) {
+        return current.path;
+      }
+
+      const curRail = this.rails.get(this.getKey(current.x, current.z));
+      if (!curRail) continue;
+
+      const neighbors: { x: number; z: number; allowed: boolean }[] = [
+        { x: current.x, z: current.z - 1, allowed: curRail.hasNorth },
+        { x: current.x, z: current.z + 1, allowed: curRail.hasSouth },
+        { x: current.x + 1, z: current.z, allowed: curRail.hasEast },
+        { x: current.x - 1, z: current.z, allowed: curRail.hasWest }
+      ];
+
+      for (const n of neighbors) {
+        if (!n.allowed) continue;
+        const key = this.getKey(n.x, n.z);
+        if (this.rails.has(key) && !visited.has(key)) {
+          visited.add(key);
+          queue.push({
+            x: n.x,
+            z: n.z,
+            path: [...current.path, { x: n.x, z: n.z }]
+          });
+        }
+      }
+    }
+    return null;
+  }
+
+  private spawnTrain() {
+    const railList = Array.from(this.rails.values()).filter(r => r.hasNorth || r.hasSouth || r.hasEast || r.hasWest);
+    if (railList.length < 6) return;
+
+    const hasPassengerStation = Array.from(this.services.values()).some(s => s.type === 'station_passenger');
+    const hasFreightStation = Array.from(this.services.values()).some(s => s.type === 'station_freight');
+
+    let trainType: 'passenger' | 'freight' = 'passenger';
+    if (hasPassengerStation && !hasFreightStation) {
+      trainType = 'passenger';
+    } else if (hasFreightStation && !hasPassengerStation) {
+      trainType = 'freight';
+    } else {
+      trainType = Math.random() < 0.5 ? 'passenger' : 'freight';
+    }
+
+    let start = railList[Math.floor(Math.random() * railList.length)];
+    let destination = railList[Math.floor(Math.random() * railList.length)];
+    let attempts = 0;
+    while (Math.hypot(start.x - destination.x, start.z - destination.z) < 5 && attempts++ < 15) {
+      destination = railList[Math.floor(Math.random() * railList.length)];
+    }
+
+    if (start === destination) return;
+
+    for (const t of this.trains) {
+      if (Math.hypot(t.x - (start.x + 0.5), t.z - (start.z + 0.5)) < 3.0) {
+        return;
+      }
+    }
+
+    const path = this.findRailPath(start.x, start.z, destination.x, destination.z);
+    if (!path || path.length < 4) return;
+
+    const startX = path[0].x + 0.5;
+    const startZ = path[0].z + 0.5;
+    const nextTile = path[1];
+    const dx = Math.sign(nextTile.x - path[0].x);
+    const dz = Math.sign(nextTile.z - path[0].z);
+    const initialAngle = Math.atan2(dx, dz);
+
+    const isWater = this.isWaterTile(path[0].x, path[0].z);
+    const trainY = isWater ? 0.16 : 0.04;
+
+    // Locomotive & Carriage Meshes
+    let engineMesh: THREE.Group;
+    const carriages: TrainCarriage[] = [];
+
+    if (trainType === 'passenger') {
+      engineMesh = VoxelRailBuilder.buildPassengerEngine(0x0284c7);
+      const coach1 = VoxelRailBuilder.buildPassengerCarriage(0x0284c7);
+      const coach2 = VoxelRailBuilder.buildPassengerCarriage(0x0284c7);
+
+      coach1.position.set(startX, trainY, startZ);
+      coach1.rotation.y = initialAngle;
+      this.trainsGroup.add(coach1);
+
+      coach2.position.set(startX, trainY, startZ);
+      coach2.rotation.y = initialAngle;
+      this.trainsGroup.add(coach2);
+
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'passenger',
+        color: 0x0284c7,
+        mesh: coach1
+      });
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'passenger',
+        color: 0x0284c7,
+        mesh: coach2
+      });
+    } else {
+      engineMesh = VoxelRailBuilder.buildFreightEngine();
+      const car1 = VoxelRailBuilder.buildCargoFlatcar(0xb91c1c);
+      const car2 = VoxelRailBuilder.buildCargoFlatcar(0x0284c7);
+
+      car1.position.set(startX, trainY, startZ);
+      car1.rotation.y = initialAngle;
+      this.trainsGroup.add(car1);
+
+      car2.position.set(startX, trainY, startZ);
+      car2.rotation.y = initialAngle;
+      this.trainsGroup.add(car2);
+
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'cargo',
+        color: 0xb91c1c,
+        mesh: car1
+      });
+      carriages.push({
+        x: startX,
+        z: startZ,
+        y: trainY,
+        rotationY: initialAngle,
+        type: 'cargo',
+        color: 0x0284c7,
+        mesh: car2
+      });
+    }
+
+    engineMesh.position.set(startX, trainY, startZ);
+    engineMesh.rotation.y = initialAngle;
+    this.trainsGroup.add(engineMesh);
+
+    const train: TrainAgent = {
+      id: Math.random().toString(),
+      type: trainType,
+      x: startX,
+      z: startZ,
+      y: trainY,
+      tileX: path[0].x,
+      tileZ: path[0].z,
+      fromTileX: path[0].x,
+      fromTileZ: path[0].z,
+      targetTileX: nextTile.x,
+      targetTileZ: nextTile.z,
+      rotationY: initialAngle,
+      speed: 0.042,
+      baseMaxSpeed: trainType === 'passenger' ? 0.048 : 0.038,
+      maxSpeed: trainType === 'passenger' ? 0.048 : 0.038,
+      turn: null,
+      dwellTime: 0,
+      whistleCooldown: 5,
+      carriages,
+      path,
+      pathIndex: 0,
+      trail: [{ x: startX, z: startZ, y: trainY, rotationY: initialAngle, dist: 0 }],
+      totalDist: 0,
+      mesh: engineMesh
+    };
+
+    this.trains.push(train);
+  }
+
+  private extendTrainPath(train: TrainAgent) {
+    if (train.pathIndex >= train.path.length - 1) {
+      const curTile = train.path[train.path.length - 1];
+      const prevTile = train.path.length >= 2 ? train.path[train.path.length - 2] : null;
+
+      const rail = this.rails.get(this.getKey(curTile.x, curTile.z));
+      if (!rail) return;
+
+      const candidates: { x: number; z: number }[] = [];
+      if (rail.hasNorth) candidates.push({ x: curTile.x, z: curTile.z - 1 });
+      if (rail.hasSouth) candidates.push({ x: curTile.x, z: curTile.z + 1 });
+      if (rail.hasEast) candidates.push({ x: curTile.x + 1, z: curTile.z });
+      if (rail.hasWest) candidates.push({ x: curTile.x - 1, z: curTile.z });
+
+      const forwardCandidates = candidates.filter(c => !prevTile || (c.x !== prevTile.x || c.z !== prevTile.z));
+      const chosen = forwardCandidates.length > 0
+        ? forwardCandidates[Math.floor(Math.random() * forwardCandidates.length)]
+        : candidates[0];
+
+      if (chosen) {
+        train.path.push(chosen);
+      } else {
+        train.path.reverse();
+        train.pathIndex = 0;
+      }
+    }
+  }
+
+  private removeTrain(index: number) {
+    const train = this.trains[index];
+    if (!train) return;
+
+    if (train.mesh) {
+      this.trainsGroup.remove(train.mesh);
+      train.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+    }
+    for (const car of train.carriages) {
+      if (car.mesh) {
+        this.trainsGroup.remove(car.mesh);
+        car.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+      }
+    }
+    this.trains.splice(index, 1);
+  }
+
   // --- ZONING ---
   public placeZone(x: number, z: number, zoneType: 'residential' | 'commercial' | 'industrial'): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
-    if (current === 'water' || current === 'road' || current?.startsWith('service_')) return false;
+    if (this.isWaterTile(x, z) || current === 'road' || current?.startsWith('service_')) return false;
 
-    if (this.stats.money < 10) return false;
-    this.stats.money -= 10;
+    if (!this.isRestoringSave && this.stats.money < 10) return false;
+    if (!this.isRestoringSave) this.stats.money -= 10;
 
     const tileZoneType: TileType = `zone_${zoneType}` as TileType;
     this.tiles.set(key, tileZoneType);
+    this.setGroundTileFoundation(x, z, 0.0);
 
     if (this.buildings.has(key)) {
       this.demolish(x, z, false);
@@ -563,18 +1315,19 @@ export class CityWorld {
   public placeService(x: number, z: number, serviceType: ServiceType): boolean {
     const key = this.getKey(x, z);
     const current = this.tiles.get(key);
-    if (current === 'water') return false;
+    if (this.isWaterTile(x, z) || current === 'road') return false;
 
     const def = SERVICE_DEFS[serviceType];
     if (!def) return false;
 
-    if (this.stats.money < def.cost) return false;
-    this.stats.money -= def.cost;
+    if (!this.isRestoringSave && this.stats.money < def.cost) return false;
+    if (!this.isRestoringSave) this.stats.money -= def.cost;
 
     this.demolish(x, z, false);
 
     const tileType: TileType = `service_${serviceType}` as TileType;
     this.tiles.set(key, tileType);
+    this.setGroundTileFoundation(x, z, 0.0);
 
     const service: PlacedService = {
       id: key,
@@ -647,12 +1400,12 @@ export class CityWorld {
   public placePipe(x: number, z: number, cost: number = 5): boolean {
     const half = this.size / 2;
     if (x < -half || x >= half || z < -half || z >= half) return false;
-    if (this.stats.money < cost) return false;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
 
     const key = this.getKey(x, z);
     if (this.pipes.has(key)) return false;
 
-    this.stats.money -= cost;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
     const pipe: UtilityPipe = {
       x,
@@ -673,12 +1426,12 @@ export class CityWorld {
   public placeWire(x: number, z: number, cost: number = 5): boolean {
     const half = this.size / 2;
     if (x < -half || x >= half || z < -half || z >= half) return false;
-    if (this.stats.money < cost) return false;
+    if (!this.isRestoringSave && this.stats.money < cost) return false;
 
     const key = this.getKey(x, z);
     if (this.wires.has(key)) return false;
 
-    this.stats.money -= cost;
+    if (!this.isRestoringSave) this.stats.money -= cost;
 
     const wire: UtilityWire = {
       x,
@@ -1137,6 +1890,29 @@ export class CityWorld {
     }
     this.pedestrians = [];
 
+    // Clear trains
+    for (const train of this.trains) {
+      if (train.mesh) {
+        this.trainsGroup.remove(train.mesh);
+        train.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+      }
+      for (const car of train.carriages) {
+        if (car.mesh) {
+          this.trainsGroup.remove(car.mesh);
+          car.mesh.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+        }
+      }
+    }
+    this.trains = [];
+
+    // Clear rails
+    for (const r of this.railMeshes.values()) {
+      this.railsGroup.remove(r);
+      r.traverse((c: any) => { if (c.isMesh) c.geometry.dispose(); });
+    }
+    this.railMeshes.clear();
+    this.rails.clear();
+
     // Clear underground pipes
     for (const p of this.pipeMeshes.values()) {
       this.pipesGroup.remove(p);
@@ -1156,6 +1932,7 @@ export class CityWorld {
     this.waterCoveredTiles.clear();
     this.powerCoveredTiles.clear();
     this.coverageGroup.clear();
+    this.clearScenery();
 
     this.streetLightsList = [];
     this.windowMeshesList = [];
@@ -1171,6 +1948,197 @@ export class CityWorld {
     }
 
     this.recalculateCityGrids();
+  }
+
+  // --- AUTOSAVE & STORAGE SYSTEM ---
+  public hasActiveCity(): boolean {
+    return this.roads.size > 0 || this.buildings.size > 0 || this.services.size > 0 || this.zoneMarkers.size > 0;
+  }
+
+  public saveCityToStorage(): boolean {
+    try {
+      const roadList: { x: number; z: number; type: RoadType }[] = [];
+      for (const r of this.roads.values()) {
+        roadList.push({ x: r.x, z: r.z, type: r.type });
+      }
+
+      const serviceList: { x: number; z: number; type: ServiceType }[] = [];
+      for (const s of this.services.values()) {
+        serviceList.push({ x: s.x, z: s.z, type: s.type });
+      }
+
+      const zoneList: { x: number; z: number; type: 'residential' | 'commercial' | 'industrial' }[] = [];
+      for (const [key] of this.zoneMarkers.entries()) {
+        const [xs, zs] = key.split(',');
+        const tileType = this.tiles.get(key);
+        if (tileType && tileType.startsWith('zone_')) {
+          const zType = tileType.replace('zone_', '') as 'residential' | 'commercial' | 'industrial';
+          zoneList.push({ x: parseInt(xs, 10), z: parseInt(zs, 10), type: zType });
+        }
+      }
+
+      const buildingList: any[] = [];
+      for (const b of this.buildings.values()) {
+        buildingList.push({
+          x: b.x,
+          z: b.z,
+          zoneType: b.zoneType,
+          height: b.height,
+          maxHeight: b.maxHeight,
+          level: b.level,
+          occupants: b.occupants,
+          color: b.color,
+          trimColor: b.trimColor
+        });
+      }
+
+      const pipeList: { x: number; z: number }[] = [];
+      for (const p of this.pipes.values()) {
+        pipeList.push({ x: p.x, z: p.z });
+      }
+
+      const wireList: { x: number; z: number }[] = [];
+      for (const w of this.wires.values()) {
+        wireList.push({ x: w.x, z: w.z });
+      }
+
+      const railList: { x: number; z: number }[] = [];
+      for (const r of this.rails.values()) {
+        railList.push({ x: r.x, z: r.z });
+      }
+
+      const saveData = {
+        version: 1,
+        timestamp: Date.now(),
+        biome: this.currentBiome,
+        size: this.size,
+        stats: { ...this.stats },
+        roads: roadList,
+        rails: railList,
+        services: serviceList,
+        zones: zoneList,
+        buildings: buildingList,
+        pipes: pipeList,
+        wires: wireList
+      };
+
+      localStorage.setItem('theotown_3d_autosave', JSON.stringify(saveData));
+      return true;
+    } catch (err) {
+      console.warn('[Autosave] Failed to save city state to localStorage:', err);
+      return false;
+    }
+  }
+
+  public loadCityFromStorage(): boolean {
+    try {
+      const raw = localStorage.getItem('theotown_3d_autosave');
+      if (!raw) return false;
+
+      const data = JSON.parse(raw);
+      if (!data || !data.biome) return false;
+
+      this.isRestoringSave = true;
+      if (data.size && [48, 64, 96, 128].includes(data.size)) {
+        this.setMapSize(data.size);
+      } else {
+        this.setMapSize(64);
+      }
+      this.generateBiome(data.biome);
+
+      // Restore Roads
+      if (Array.isArray(data.roads)) {
+        for (const r of data.roads) {
+          this.placeRoad(r.x, r.z, r.type, false);
+        }
+      }
+      this.sanitizeBridgesOnLand();
+
+      // Restore Rails
+      if (Array.isArray(data.rails)) {
+        for (const r of data.rails) {
+          this.placeRail(r.x, r.z);
+        }
+      }
+
+      // Restore Services
+      if (Array.isArray(data.services)) {
+        for (const s of data.services) {
+          this.placeService(s.x, s.z, s.type);
+        }
+      }
+
+      // Restore Pipes
+      if (Array.isArray(data.pipes)) {
+        for (const p of data.pipes) {
+          this.placePipe(p.x, p.z, 0);
+        }
+      }
+
+      // Restore Wires
+      if (Array.isArray(data.wires)) {
+        for (const w of data.wires) {
+          this.placeWire(w.x, w.z, 0);
+        }
+      }
+
+      // Restore Zones
+      if (Array.isArray(data.zones)) {
+        for (const z of data.zones) {
+          this.placeZone(z.x, z.z, z.type);
+        }
+      }
+
+      // Restore Buildings
+      if (Array.isArray(data.buildings)) {
+        for (const bData of data.buildings) {
+          const key = this.getKey(bData.x, bData.z);
+          const b: VoxelBuilding = {
+            id: key,
+            x: bData.x,
+            z: bData.z,
+            height: bData.height,
+            maxHeight: bData.maxHeight,
+            zoneType: bData.zoneType,
+            level: bData.level,
+            occupants: bData.occupants,
+            color: bData.color,
+            trimColor: bData.trimColor,
+            hasPower: true,
+            hasWater: true,
+            hasPolice: true,
+            hasFire: true,
+            hasHealth: true,
+            happiness: 80
+          };
+          this.buildings.set(key, b);
+          this.buildVoxelMesh(b);
+          const marker = this.zoneMarkers.get(key);
+          if (marker) marker.visible = false;
+        }
+      }
+
+      // Restore Stats
+      if (data.stats) {
+        this.stats = { ...this.stats, ...data.stats };
+      }
+
+      this.isRestoringSave = false;
+      this.recalculateCityGrids();
+      return true;
+    } catch (err) {
+      this.isRestoringSave = false;
+      console.warn('[Autosave] Failed to load city state from localStorage:', err);
+      return false;
+    }
+  }
+
+  public clearAutosave() {
+    try {
+      localStorage.removeItem('theotown_3d_autosave');
+    } catch (e) {
+      console.warn('Could not clear autosave:', e);
+    }
   }
 
   // --- DEMOLISH ---
@@ -1230,6 +2198,11 @@ export class CityWorld {
       this.roadMeshes.delete(key);
       this.roads.delete(key);
       this.updateSurroundingRoads(x, z);
+    }
+
+    // Demolish Rail
+    if (this.rails.has(key)) {
+      this.demolishRail(x, z, false);
     }
 
     // Demolish Zone
@@ -1314,7 +2287,8 @@ export class CityWorld {
     }
 
     // 3. Citizen & Vehicle Spawning
-    const maxCars = Math.min(Math.floor(this.roads.size * 0.45) + 3, 30);
+    const sizeScale = this.size / 64;
+    const maxCars = Math.min(Math.floor(this.roads.size * 0.45) + 3, Math.round(30 * sizeScale));
     if (this.roads.size >= 4 && this.cars.length < maxCars) {
       if (Math.random() < 0.35 * this.stats.gameSpeed) {
         this.spawnCar();
@@ -1322,10 +2296,18 @@ export class CityWorld {
     }
 
     // Spawn walking citizens along sidewalks only when there are citizens (population > 0)
-    const allowedPeds = Math.min(Math.floor(this.stats.population / 3), 20);
+    const allowedPeds = Math.min(Math.floor(this.stats.population / 25) + 2, Math.round(25 * sizeScale));
     if (this.roads.size >= 2 && this.pedestrians.length < allowedPeds) {
       if (Math.random() < 0.35 * this.stats.gameSpeed) {
         this.spawnPedestrian();
+      }
+    }
+
+    // Spawn trains along rail networks
+    const maxTrains = Math.min(Math.floor(this.rails.size / 14) + 1, Math.round(5 * sizeScale));
+    if (this.rails.size >= 6 && this.trains.length < maxTrains) {
+      if (Math.random() < 0.25 * this.stats.gameSpeed) {
+        this.spawnTrain();
       }
     }
 
@@ -1482,24 +2464,25 @@ export class CityWorld {
     let building = this.buildings.get(key);
 
     if (!building) {
-      const maxH = zoneType === 'residential' ? 2 + Math.floor(Math.random() * 3) :
-                   zoneType === 'commercial' ? 3 + Math.floor(Math.random() * 6) :
-                   1 + Math.floor(Math.random() * 2);
+      const initialMaxH = zoneType === 'residential' ? 2 + Math.floor(Math.random() * 3) :
+                          zoneType === 'commercial' ? 3 + Math.floor(Math.random() * 4) :
+                          1 + Math.floor(Math.random() * 2);
 
       const wallColors = zoneType === 'residential' ? this.COLORS.resWall :
                          zoneType === 'commercial' ? this.COLORS.comWall :
                          this.COLORS.indWall;
       const wallColor = wallColors[Math.floor(Math.random() * wallColors.length)];
+      const initialOccupants = zoneType === 'residential' ? 14 : zoneType === 'commercial' ? 20 : 25;
 
       building = {
         id: key,
         x,
         z,
         height: 1,
-        maxHeight: maxH,
+        maxHeight: initialMaxH,
         zoneType,
         level: 1,
-        occupants: 4,
+        occupants: initialOccupants,
         color: wallColor,
         trimColor: this.COLORS.resRoof[Math.floor(Math.random() * this.COLORS.resRoof.length)],
         hasPower: true,
@@ -1516,10 +2499,35 @@ export class CityWorld {
       const marker = this.zoneMarkers.get(key);
       if (marker) marker.visible = false;
     } else {
+      // Skyscraper level-up upgrades when well-serviced by utilities and public safety
+      const isServiced = building.hasPower && building.hasWater && building.happiness >= 65;
+      if (isServiced && building.height >= building.maxHeight) {
+        if (building.zoneType === 'residential' && building.maxHeight < 14) {
+          building.maxHeight += 2;
+        } else if (building.zoneType === 'commercial' && building.maxHeight < 16) {
+          building.maxHeight += 2;
+        } else if (building.zoneType === 'industrial' && building.maxHeight < 6) {
+          building.maxHeight += 1;
+        }
+      }
+
       if (building.height < building.maxHeight) {
         building.height++;
-        building.occupants += 4;
         building.level = Math.ceil(building.height / 2);
+
+        // Density scaling: low-rise -> mid-rise -> high-rise -> megacity skyscraper (millions of population)
+        if (building.height <= 2) {
+          building.occupants = 14 + building.height * 14;
+        } else if (building.height <= 4) {
+          building.occupants = 65 + (building.height - 2) * 110;
+        } else if (building.height <= 7) {
+          building.occupants = 450 + (building.height - 4) * 750;
+        } else if (building.height <= 10) {
+          building.occupants = 3200 + (building.height - 7) * 3500;
+        } else {
+          building.occupants = 16000 + (building.height - 10) * 9000; // 16,000 to 52,000 per mega tower
+        }
+
         this.buildVoxelMesh(building);
       }
     }
@@ -2064,7 +3072,33 @@ export class CityWorld {
         }
       }
 
-      // 5. Apply Braking / Acceleration Physics
+      // 5. Level Crossing Yielding:
+      // Road vehicles must ALWAYS stop before railroad tracks if a train is near or crossing!
+      const curCrossing = this.rails.get(this.getKey(curTileX, curTileZ))?.isCrossing;
+      const toCrossing = this.rails.get(this.getKey(car.toTile.x, car.toTile.z))?.isCrossing;
+      if (curCrossing || toCrossing) {
+        const crossingTileX = curCrossing ? curTileX : car.toTile.x;
+        const crossingTileZ = curCrossing ? curTileZ : car.toTile.z;
+        for (const train of this.trains) {
+          const trainDist = Math.hypot(train.x - (crossingTileX + 0.5), train.z - (crossingTileZ + 0.5));
+          let anyCarNear = trainDist < 2.5;
+          if (!anyCarNear) {
+            for (const c of train.carriages) {
+              if (Math.hypot(c.x - (crossingTileX + 0.5), c.z - (crossingTileZ + 0.5)) < 1.6) {
+                anyCarNear = true;
+                break;
+              }
+            }
+          }
+          if (anyCarNear) {
+            desiredSpeed = 0;
+            emergencyBrake = true;
+            break;
+          }
+        }
+      }
+
+      // 6. Apply Braking / Acceleration Physics
       if (emergencyBrake) {
         car.speed = Math.min(car.speed * 0.7, desiredSpeed);
         if (car.speed < 0.002) car.speed = 0;
@@ -2315,6 +3349,246 @@ export class CityWorld {
       if (leftLeg && rightLeg) {
         leftLeg.rotation.x = swing;
         rightLeg.rotation.x = -swing;
+      }
+    }
+
+    // 4. Train Physics & Movement
+    for (let i = this.trains.length - 1; i >= 0; i--) {
+      const train = this.trains[i];
+
+      // Safety check: verify track tile exists
+      const curTileX = Math.floor(train.x);
+      const curTileZ = Math.floor(train.z);
+      const curRail = this.rails.get(this.getKey(curTileX, curTileZ));
+      if (!curRail) {
+        this.removeTrain(i);
+        continue;
+      }
+
+      // Decrement whistle cooldown
+      if (train.whistleCooldown > 0) {
+        train.whistleCooldown -= deltaTime * speedMult;
+      }
+
+      // Station Dwell: pause for passenger boarding or freight loading
+      if (train.dwellTime > 0) {
+        train.dwellTime -= deltaTime * speedMult;
+        // Skip moving while dwelling at station
+        continue;
+      } else if (train.dwellTime <= 0 && train.dwellTime > -30) {
+        train.dwellTime -= deltaTime * speedMult;
+      }
+
+      const trainSpeed = (train.type === 'passenger' ? 0.048 : 0.038) * speedMult * (deltaTime * 60);
+
+      if (train.turn) {
+        const turn = train.turn;
+        turn.progress += trainSpeed / turn.arcLength;
+
+        if (turn.progress < 1.0) {
+          const t = turn.progress;
+          const invT = 1 - t;
+          train.x = invT * invT * turn.pIn.x + 2 * invT * t * turn.p1.x + t * t * turn.pOut.x;
+          train.z = invT * invT * turn.pIn.z + 2 * invT * t * turn.p1.z + t * t * turn.pOut.z;
+          const tanX = 2 * invT * (turn.p1.x - turn.pIn.x) + 2 * t * (turn.pOut.x - turn.p1.x);
+          const tanZ = 2 * invT * (turn.p1.z - turn.pIn.z) + 2 * t * (turn.pOut.z - turn.p1.z);
+          train.rotationY = Math.atan2(tanX, tanZ);
+        } else {
+          // Finish turn: snap to outgoing boundary & heading
+          train.x = turn.pOut.x;
+          train.z = turn.pOut.z;
+          train.rotationY = turn.outHeading;
+          train.fromTileX = train.targetTileX;
+          train.fromTileZ = train.targetTileZ;
+          train.pathIndex++;
+
+          if (train.pathIndex >= train.path.length - 1) {
+            this.extendTrainPath(train);
+          }
+
+          if (train.pathIndex < train.path.length - 1) {
+            const nextP = train.path[train.pathIndex + 1];
+            train.targetTileX = nextP.x;
+            train.targetTileZ = nextP.z;
+          }
+          train.turn = null;
+        }
+      } else {
+        const curTile = train.path[train.pathIndex] || { x: curTileX, z: curTileZ };
+        let nextTile = train.path[train.pathIndex + 1];
+
+        if (!nextTile) {
+          this.extendTrainPath(train);
+          nextTile = train.path[train.pathIndex + 1];
+        }
+
+        if (!nextTile) {
+          // End of line, reverse path
+          train.path.reverse();
+          train.pathIndex = 0;
+          nextTile = train.path[1];
+        }
+
+        if (nextTile) {
+          const dx = Math.sign(nextTile.x - curTile.x);
+          const dz = Math.sign(nextTile.z - curTile.z);
+
+          if (dx === 0 && dz === 0) {
+            train.pathIndex++;
+            continue;
+          }
+
+          // Check if the tile after nextTile requires a 90-degree turn
+          const futureTile = train.path[train.pathIndex + 2];
+          let willTurn = false;
+          let outDx = 0;
+          let outDz = 0;
+
+          if (futureTile) {
+            outDx = Math.sign(futureTile.x - nextTile.x);
+            outDz = Math.sign(futureTile.z - nextTile.z);
+            if ((dx !== 0 && outDz !== 0) || (dz !== 0 && outDx !== 0)) {
+              willTurn = true;
+            }
+          }
+
+          const entryX = nextTile.x + 0.5 - dx * 0.5;
+          const entryZ = nextTile.z + 0.5 - dz * 0.5;
+          const distToEntry = Math.hypot(entryX - train.x, entryZ - train.z);
+
+          if (willTurn && distToEntry <= trainSpeed * 1.5) {
+            // Start parametric Bezier turn
+            const pIn = { x: entryX, z: entryZ };
+            const pOut = { x: nextTile.x + 0.5 + outDx * 0.5, z: nextTile.z + 0.5 + outDz * 0.5 };
+            const p1 = { x: nextTile.x + 0.5, z: nextTile.z + 0.5 };
+            const outHeading = Math.atan2(outDx, outDz);
+
+            train.turn = {
+              pIn,
+              p1,
+              pOut,
+              outHeading,
+              arcLength: (Math.PI / 4) * 0.5,
+              progress: 0
+            };
+            train.targetTileX = nextTile.x;
+            train.targetTileZ = nextTile.z;
+          } else {
+            // Straight track travel
+            const heading = Math.atan2(dx, dz);
+            train.rotationY = heading;
+
+            const targetCenterDist = Math.hypot((nextTile.x + 0.5) - train.x, (nextTile.z + 0.5) - train.z);
+            if (targetCenterDist <= trainSpeed) {
+              train.x = nextTile.x + 0.5;
+              train.z = nextTile.z + 0.5;
+              train.pathIndex++;
+              train.fromTileX = nextTile.x;
+              train.fromTileZ = nextTile.z;
+              if (train.pathIndex < train.path.length - 1) {
+                train.targetTileX = train.path[train.pathIndex + 1].x;
+                train.targetTileZ = train.path[train.pathIndex + 1].z;
+              }
+            } else {
+              train.x += dx * trainSpeed;
+              train.z += dz * trainSpeed;
+            }
+          }
+        }
+      }
+
+      // Track Elevation (Bridge trestle vs surface track)
+      const isWater = this.isWaterTile(Math.floor(train.x), Math.floor(train.z));
+      const targetY = isWater ? 0.16 : 0.04;
+      train.y += (targetY - train.y) * 0.2;
+
+      // Update locomotive 3D mesh
+      train.mesh.position.set(train.x, train.y, train.z);
+      train.mesh.rotation.y = train.rotationY;
+
+      // Station Stopping Check
+      const adjTiles = [
+        this.getKey(curTileX + 1, curTileZ),
+        this.getKey(curTileX - 1, curTileZ),
+        this.getKey(curTileX, curTileZ + 1),
+        this.getKey(curTileX, curTileZ - 1)
+      ];
+      for (const aKey of adjTiles) {
+        const svc = this.services.get(aKey);
+        if (svc) {
+          if (train.type === 'passenger' && svc.type === 'station_passenger') {
+            if (train.dwellTime <= -12) {
+              train.dwellTime = 3.5;
+              this.soundEngine?.playTrainWhistle();
+            }
+          } else if (train.type === 'freight' && svc.type === 'station_freight') {
+            if (train.dwellTime <= -12) {
+              train.dwellTime = 4.0;
+              this.soundEngine?.playTrainWhistle();
+            }
+          }
+        }
+      }
+
+      // Level Crossing Whistle Check
+      if (curRail.isCrossing && train.whistleCooldown <= 0) {
+        this.soundEngine?.playTrainWhistle();
+        train.whistleCooldown = 22;
+      }
+
+      // Record Trail Buffer for Smooth Following Carriages
+      const lastPoint = train.trail[train.trail.length - 1];
+      const deltaMove = lastPoint ? Math.hypot(train.x - lastPoint.x, train.z - lastPoint.z) : 0;
+      train.totalDist += deltaMove;
+
+      if (deltaMove > 0.02 || train.trail.length === 0) {
+        train.trail.push({
+          x: train.x,
+          z: train.z,
+          y: train.y,
+          rotationY: train.rotationY,
+          dist: train.totalDist
+        });
+      }
+
+      // Update Carriages along trail buffer
+      const CARRIAGE_SPACING = 0.82;
+      for (let cIdx = 0; cIdx < train.carriages.length; cIdx++) {
+        const carriage = train.carriages[cIdx];
+        const targetD = train.totalDist - (cIdx + 1) * CARRIAGE_SPACING;
+
+        if (targetD <= 0 || train.trail.length < 2) {
+          carriage.mesh.position.set(train.x, train.y, train.z);
+          carriage.mesh.rotation.y = train.rotationY;
+        } else {
+          // Find adjacent points in trail buffer
+          let p0 = train.trail[0];
+          let p1 = train.trail[1];
+          for (let pIdx = train.trail.length - 1; pIdx >= 1; pIdx--) {
+            if (train.trail[pIdx].dist >= targetD && train.trail[pIdx - 1].dist <= targetD) {
+              p0 = train.trail[pIdx - 1];
+              p1 = train.trail[pIdx];
+              break;
+            }
+          }
+
+          const distSpan = p1.dist - p0.dist || 0.001;
+          const factor = Math.max(0, Math.min(1, (targetD - p0.dist) / distSpan));
+
+          const carX = p0.x + (p1.x - p0.x) * factor;
+          const carZ = p0.z + (p1.z - p0.z) * factor;
+          const carY = p0.y + (p1.y - p0.y) * factor;
+          const carHeading = Math.atan2(p1.x - p0.x, p1.z - p0.z);
+
+          carriage.mesh.position.set(carX, carY, carZ);
+          carriage.mesh.rotation.y = carHeading;
+        }
+      }
+
+      // Prune old trail points beyond maximum carriage distance
+      const maxRetainDist = train.totalDist - (train.carriages.length + 1) * CARRIAGE_SPACING - 1.5;
+      while (train.trail.length > 2 && train.trail[1].dist < maxRetainDist) {
+        train.trail.shift();
       }
     }
   }

@@ -7,6 +7,8 @@ export class VoxelCameraControls {
 
   public target: THREE.Vector3 = new THREE.Vector3(0, 0, 0);
   public radius: number = 28;
+  public minRadius: number = 6;
+  public maxRadius: number = 95;
   public theta: number = Math.PI / 4; // Horizontal rotation
   public phi: number = Math.PI / 3.5; // Vertical pitch
 
@@ -21,6 +23,40 @@ export class VoxelCameraControls {
     this.domElement = domElement;
     this.updateCamera();
     this.setupListeners();
+  }
+
+  public setMaxZoomForMapSize(mapSize: number) {
+    this.maxRadius = Math.max(95, Math.round(mapSize * 1.5));
+    if (this.radius > this.maxRadius) {
+      this.radius = this.maxRadius;
+      this.updateCamera();
+    }
+  }
+
+  public panBy(deltaX: number, deltaY: number) {
+    const forward = new THREE.Vector3();
+    this.camera.getWorldDirection(forward);
+    forward.y = 0;
+    forward.normalize();
+
+    const right = new THREE.Vector3();
+    right.crossVectors(forward, new THREE.Vector3(0, 1, 0)).normalize();
+
+    const panSpeed = 0.038 * (this.radius / 25);
+    this.target.addScaledVector(right, -deltaX * panSpeed);
+    this.target.addScaledVector(forward, deltaY * panSpeed);
+    this.updateCamera();
+  }
+
+  public orbitBy(deltaX: number, deltaY: number) {
+    this.theta -= deltaX * 0.008;
+    this.phi = Math.max(0.15, Math.min(Math.PI / 2.1, this.phi - deltaY * 0.008));
+    this.updateCamera();
+  }
+
+  public zoomBy(delta: number) {
+    this.radius = Math.max(this.minRadius, Math.min(this.maxRadius, this.radius + delta));
+    this.updateCamera();
   }
 
   private setupListeners() {
@@ -116,14 +152,88 @@ export class VoxelCameraControls {
     this.domElement.addEventListener('wheel', (e) => {
       if (!this.enabled) return;
       e.preventDefault();
-      this.radius = Math.max(6, Math.min(95, this.radius + e.deltaY * 0.035));
+      this.radius = Math.max(this.minRadius, Math.min(this.maxRadius, this.radius + e.deltaY * 0.035));
       this.updateCamera();
     }, { passive: false });
+
+    // --- MOBILE TOUCH GESTURES: 2-Finger Pinch Zoom, 2-Finger Pan, 2-Finger Orbit ---
+    let prevTouchCenter: { x: number; y: number } | null = null;
+    let prevTouchDist: number | null = null;
+    let prevTouchAngle: number | null = null;
+
+    this.domElement.addEventListener('touchstart', (e: TouchEvent) => {
+      if (!this.enabled) return;
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        prevTouchCenter = {
+          x: (t0.clientX + t1.clientX) / 2,
+          y: (t0.clientY + t1.clientY) / 2
+        };
+        prevTouchDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        prevTouchAngle = Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX);
+      } else {
+        prevTouchCenter = null;
+        prevTouchDist = null;
+        prevTouchAngle = null;
+      }
+    }, { passive: false });
+
+    this.domElement.addEventListener('touchmove', (e: TouchEvent) => {
+      if (!this.enabled) return;
+      if (e.touches.length === 2 && prevTouchCenter && prevTouchDist !== null) {
+        e.preventDefault();
+        const t0 = e.touches[0];
+        const t1 = e.touches[1];
+        const curCenter = {
+          x: (t0.clientX + t1.clientX) / 2,
+          y: (t0.clientY + t1.clientY) / 2
+        };
+        const curDist = Math.hypot(t1.clientX - t0.clientX, t1.clientY - t0.clientY);
+        const curAngle = Math.atan2(t1.clientY - t0.clientY, t1.clientX - t0.clientX);
+
+        // 1. Two-finger Pan
+        const deltaX = curCenter.x - prevTouchCenter.x;
+        const deltaY = curCenter.y - prevTouchCenter.y;
+        this.panBy(deltaX, deltaY);
+
+        // 2. Pinch Zoom
+        const distDelta = curDist - prevTouchDist;
+        if (Math.abs(distDelta) > 1) {
+          const zoomSpeed = 0.08 * (this.radius / 25);
+          this.zoomBy(-distDelta * zoomSpeed);
+        }
+
+        // 3. Two-finger Rotation / Orbit
+        if (prevTouchAngle !== null) {
+          let angleDelta = curAngle - prevTouchAngle;
+          while (angleDelta > Math.PI) angleDelta -= Math.PI * 2;
+          while (angleDelta < -Math.PI) angleDelta += Math.PI * 2;
+          if (Math.abs(angleDelta) > 0.02) {
+            this.theta -= angleDelta * 0.9;
+            this.updateCamera();
+          }
+        }
+
+        prevTouchCenter = curCenter;
+        prevTouchDist = curDist;
+        prevTouchAngle = curAngle;
+      }
+    }, { passive: false });
+
+    const resetTouches = () => {
+      prevTouchCenter = null;
+      prevTouchDist = null;
+      prevTouchAngle = null;
+    };
+    this.domElement.addEventListener('touchend', resetTouches);
+    this.domElement.addEventListener('touchcancel', resetTouches);
 
     // Keyboard Pan (WASD / Arrows / QE rotation)
     window.addEventListener('keydown', (e) => {
       if (!this.enabled) return;
-      const speed = 1.0;
+      const speed = 1.0 * Math.max(1, this.radius / 25);
       const forward = new THREE.Vector3();
       this.camera.getWorldDirection(forward);
       forward.y = 0;

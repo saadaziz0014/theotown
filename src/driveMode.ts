@@ -481,7 +481,8 @@ export class DriveModeController {
     const tileX = Math.floor(this.x);
     const tileZ = Math.floor(this.z);
     const road = this.world.roads.get(this.world.getKey(tileX, tileZ));
-    const targetY = road ? (road.elevation + 0.04) : 0.04;
+    const terrainTop = this.world.baseTerrainHeights.get(this.world.getKey(tileX, tileZ)) ?? 0.0;
+    const targetY = road ? (road.elevation + 0.04) : Math.max(0.04, terrainTop + 0.04);
     this.y += (targetY - this.y) * 0.2;
 
     // Tiny suspension bounce
@@ -638,7 +639,7 @@ export class DriveModeController {
           </div>
         </div>
 
-        <!-- Controls Legend -->
+        <!-- Controls Legend (Desktop) -->
         <div class="drive-legend">
           <span><b>[W/S]</b> Gas & Brake</span>
           <span>•</span>
@@ -652,6 +653,28 @@ export class DriveModeController {
           <span>•</span>
           <span><b>[ESC]</b> Exit</span>
         </div>
+
+        <!-- Mobile Touch Virtual Driving Controls -->
+        <div id="drive-mobile-controls" class="drive-mobile-controls">
+          <!-- Steering: Left & Right -->
+          <div class="mobile-steer-cluster">
+            <button id="touch-steer-left" class="mobile-drive-btn steer-btn" aria-label="Steer Left">◀</button>
+            <button id="touch-steer-right" class="mobile-drive-btn steer-btn" aria-label="Steer Right">▶</button>
+          </div>
+
+          <!-- Quick Mobile Actions -->
+          <div class="mobile-action-cluster">
+            <button id="touch-btn-boost" class="mobile-drive-btn boost-pill" aria-label="Nitro Boost">⚡ NITRO</button>
+            <button id="touch-btn-drift" class="mobile-drive-btn drift-pill" aria-label="Drift">💨 DRIFT</button>
+            <button id="touch-btn-honk" class="mobile-drive-btn honk-pill" aria-label="Honk">🔊 HORN</button>
+          </div>
+
+          <!-- Pedals: Brake & Gas -->
+          <div class="mobile-pedal-cluster">
+            <button id="touch-pedal-brake" class="mobile-drive-btn pedal-btn brake-btn" aria-label="Brake / Reverse">▼ BRAKE</button>
+            <button id="touch-pedal-gas" class="mobile-drive-btn pedal-btn gas-btn" aria-label="Accelerate">▲ GAS</button>
+          </div>
+        </div>
       `;
       document.body.appendChild(hud);
 
@@ -664,6 +687,39 @@ export class DriveModeController {
       const boostBtn = document.getElementById('btn-drive-boost');
       boostBtn?.addEventListener('mousedown', () => { this.keys.shift = true; });
       window.addEventListener('mouseup', () => { this.keys.shift = false; });
+
+      // Virtual Touch Driving Controls Event Handlers
+      const bindTouchKey = (elementId: string, keyName: 'w' | 's' | 'a' | 'd' | 'shift' | 'space') => {
+        const el = document.getElementById(elementId);
+        if (!el) return;
+        const press = (e: Event) => {
+          e.preventDefault();
+          this.keys[keyName] = true;
+          el.classList.add('pressed');
+        };
+        const release = (e: Event) => {
+          e.preventDefault();
+          this.keys[keyName] = false;
+          el.classList.remove('pressed');
+        };
+        el.addEventListener('touchstart', press, { passive: false });
+        el.addEventListener('touchend', release, { passive: false });
+        el.addEventListener('touchcancel', release, { passive: false });
+        el.addEventListener('mousedown', press);
+        el.addEventListener('mouseup', release);
+        el.addEventListener('mouseleave', release);
+      };
+
+      bindTouchKey('touch-steer-left', 'a');
+      bindTouchKey('touch-steer-right', 'd');
+      bindTouchKey('touch-pedal-gas', 'w');
+      bindTouchKey('touch-pedal-brake', 's');
+      bindTouchKey('touch-btn-boost', 'shift');
+      bindTouchKey('touch-btn-drift', 'space');
+
+      const mobileHonk = document.getElementById('touch-btn-honk');
+      mobileHonk?.addEventListener('touchstart', (e) => { e.preventDefault(); this.honk(); }, { passive: false });
+      mobileHonk?.addEventListener('click', () => this.honk());
     }
 
     this.hudContainer = hud;
