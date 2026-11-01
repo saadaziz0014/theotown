@@ -20,6 +20,12 @@ body, html {
   width: 100%;
   height: 100%;
   z-index: 1;
+  touch-action: none;
+}
+
+canvas {
+  touch-action: none;
+  display: block;
 }
 
 /* UI Overlay */
@@ -1029,6 +1035,133 @@ body, html {
 }
 
 /* ========================================================
+   VIRTUAL MOBILE DRIVING CONTROLS
+   ======================================================== */
+.drive-mobile-controls {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  display: none;
+  z-index: 1005;
+}
+
+@media (max-width: 900px), (pointer: coarse) {
+  .drive-mobile-controls {
+    display: block;
+  }
+  .drive-legend {
+    display: none !important;
+  }
+}
+
+.mobile-steer-cluster {
+  position: absolute;
+  bottom: 24px;
+  left: 20px;
+  display: flex;
+  gap: 14px;
+  pointer-events: auto;
+}
+
+.mobile-pedal-cluster {
+  position: absolute;
+  bottom: 24px;
+  right: 20px;
+  display: flex;
+  gap: 14px;
+  pointer-events: auto;
+}
+
+.mobile-action-cluster {
+  position: absolute;
+  bottom: 120px;
+  right: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  pointer-events: auto;
+}
+
+.mobile-drive-btn {
+  background: rgba(15, 23, 42, 0.85);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  color: #fff;
+  font-family: inherit;
+  font-weight: 800;
+  border-radius: 18px;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  transition: transform 0.08s ease, background 0.08s ease, border-color 0.08s ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.mobile-drive-btn:active,
+.mobile-drive-btn.pressed {
+  transform: scale(0.92);
+  background: rgba(56, 189, 248, 0.45);
+  border-color: #38bdf8;
+  box-shadow: 0 4px 12px rgba(56, 189, 248, 0.4);
+}
+
+.steer-btn {
+  width: 64px;
+  height: 64px;
+  font-size: 24px;
+  border-radius: 50%;
+}
+
+.pedal-btn {
+  width: 72px;
+  height: 80px;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.gas-btn {
+  background: linear-gradient(145deg, rgba(34, 197, 94, 0.35), rgba(15, 23, 42, 0.85));
+  border-color: rgba(74, 222, 128, 0.5);
+}
+
+.gas-btn:active, .gas-btn.pressed {
+  background: #16a34a;
+  border-color: #4ade80;
+}
+
+.brake-btn {
+  background: linear-gradient(145deg, rgba(239, 68, 68, 0.35), rgba(15, 23, 42, 0.85));
+  border-color: rgba(248, 113, 113, 0.5);
+}
+
+.brake-btn:active, .brake-btn.pressed {
+  background: #dc2626;
+  border-color: #f87171;
+}
+
+.boost-pill, .drift-pill, .honk-pill {
+  padding: 8px 16px;
+  font-size: 12px;
+  border-radius: 12px;
+}
+
+.boost-pill {
+  background: linear-gradient(135deg, rgba(245, 158, 11, 0.4), rgba(15, 23, 42, 0.85));
+  border-color: #fbbf24;
+}
+
+.boost-pill:active, .boost-pill.pressed {
+  background: #d97706;
+}
+
+/* ========================================================
    RESPONSIVE HUD ADAPTATIONS
    ======================================================== */
 @media (max-width: 1400px) {
@@ -1074,8 +1207,452 @@ body, html {
   .demand-meter {
     display: none;
   }
-  .stat-pill:nth-child(4) {
-    /* Water icon compact */
+}
+
+/* ========================================================
+   FULL MOBILE RESPONSIVENESS (< 900px)
+   ======================================================== */
+@media (max-width: 900px) {
+  #ui-overlay {
+    padding: env(safe-area-inset-top, 8px) env(safe-area-inset-right, 8px) env(safe-area-inset-bottom, 8px) env(safe-area-inset-left, 8px);
+  }
+
+  #top-bar {
+    padding: 6px 8px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+
+  .city-brand {
+    padding-right: 0;
+  }
+
+  .brand-badge {
+    padding: 2px 6px;
+    font-size: 10px;
+    letter-spacing: 0.5px;
+  }
+
+  .stat-pill {
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .stat-sub {
+    display: none; /* Hide verbose secondary labels on mobile */
+  }
+
+  .stat-val {
+    font-size: 11px;
+  }
+
+  .stat-icon {
+    font-size: 13px;
+  }
+
+  /* Compact dropdown buttons */
+  .dropdown-trigger-btn {
+    padding: 6px 8px;
+    gap: 4px;
+  }
+
+  .dropdown-current-text {
+    font-size: 11px;
+    max-width: 80px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .drive-mode-launch-btn {
+    padding: 6px 10px;
+    font-size: 11px;
+    gap: 4px;
+  }
+
+  /* Bottom Dock on Tablet/Phablet */
+  #bottom-dock {
+    bottom: 8px;
+    padding: 6px 8px;
+    max-width: calc(100% - 16px);
+    width: auto;
+    border-radius: 16px;
+  }
+
+  .tool-palette {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 2px;
+    gap: 6px;
+  }
+  .tool-palette::-webkit-scrollbar {
+    display: none;
+  }
+
+  .tool-btn {
+    min-width: 52px;
+    padding: 6px 8px;
+    border-radius: 12px;
+    flex-shrink: 0;
+  }
+
+  .btn-icon {
+    font-size: 18px;
+  }
+
+  .btn-name {
+    font-size: 10px;
+  }
+
+  /* Submenus */
+  .road-submenu, .service-submenu, .rail-submenu {
+    bottom: 74px;
+    max-width: calc(100% - 16px);
+    width: auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 6px 8px;
+    gap: 6px;
+    border-radius: 14px;
+  }
+  .road-submenu::-webkit-scrollbar, .service-submenu::-webkit-scrollbar, .rail-submenu::-webkit-scrollbar {
+    display: none;
+  }
+
+  .road-type-btn, .service-type-btn, .rail-type-btn {
+    flex-shrink: 0;
+    padding: 6px 10px;
+  }
+
+  #infoview-dock {
+    top: auto;
+    bottom: 82px;
+    right: 12px;
+    padding: 4px 6px;
+    gap: 4px;
+    flex-direction: row;
+    border-radius: 12px;
+  }
+  .infoview-label {
+    display: none;
+  }
+  .overlay-btn {
+    padding: 4px 8px;
+    font-size: 11px;
+  }
+
+  /* Drive HUD on mobile */
+  .drive-hud {
+    padding: 12px 16px;
+  }
+  .drive-badge {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .drive-exit-btn {
+    padding: 6px 12px;
+    font-size: 12px;
+  }
+  .drive-cluster {
+    padding: 8px 14px;
+    gap: 10px;
+  }
+  .speed-number {
+    font-size: 32px;
+  }
+  .nitro-box {
+    min-width: 130px;
+  }
+  .drive-actions {
+    display: none; /* Replaced by virtual touch cluster */
+  }
+}
+
+/* ========================================================
+   PHONE / NARROW SCREENS (< 640px)
+   ======================================================== */
+@media (max-width: 640px) {
+  #top-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    padding: 6px 8px;
+  }
+
+  .top-bar-left {
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .stats-group {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    gap: 4px;
+    flex-wrap: nowrap;
+    width: 100%;
+  }
+  .stats-group::-webkit-scrollbar {
+    display: none;
+  }
+
+  .top-bar-right {
+    justify-content: space-between;
+    width: 100%;
+    gap: 4px;
+  }
+
+  .dropdown-trigger-btn {
+    flex: 1;
+    justify-content: center;
+    padding: 4px 6px;
+  }
+
+  .dropdown-current-text {
+    max-width: 58px;
+    font-size: 10px;
+  }
+
+  .drive-mode-launch-btn {
+    padding: 4px 8px;
+    font-size: 10.5px;
+  }
+  .drive-text {
+    display: none; /* Show icon only on small phone */
+  }
+
+  /* Dropdown Menus on phone */
+  .dropdown-menu {
+    position: fixed;
+    top: 72px;
+    left: 12px;
+    right: 12px;
+    width: auto;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 140px);
+    overflow-y: auto;
+  }
+
+  /* Bottom Dock on small phone */
+  #bottom-dock {
+    width: calc(100% - 12px);
+    bottom: 6px;
+    padding: 4px;
+  }
+
+  .tool-btn {
+    min-width: 46px;
+    padding: 5px 6px;
+  }
+  .btn-icon {
+    font-size: 16px;
+  }
+  .btn-name {
+    font-size: 9px;
+  }
+
+  .road-submenu, .service-submenu, .rail-submenu {
+    bottom: 66px;
+    width: calc(100% - 12px);
+    padding: 4px 6px;
+    gap: 4px;
+  }
+
+  .road-type-btn, .service-type-btn, .rail-type-btn {
+    padding: 4px 8px;
+    gap: 4px;
+  }
+  .road-icon {
+    font-size: 12px;
+  }
+  .road-title {
+    font-size: 10px;
+  }
+  .road-cost {
+    font-size: 9.5px;
+    padding: 1px 4px;
+  }
+
+  #infoview-dock {
+    top: 76px;
+    right: 8px;
+    padding: 3px 6px;
+    gap: 4px;
+    flex-direction: column;
+    border-radius: 12px;
+    max-height: 28px;
+    overflow: hidden;
+    transition: max-height 0.25s cubic-bezier(0.16, 1, 0.3, 1), padding 0.2s ease;
+    z-index: 150;
+  }
+
+  #infoview-dock.open {
+    max-height: 260px;
+    padding: 6px 8px;
+    background: rgba(15, 23, 42, 0.96);
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7);
+  }
+
+  .infoview-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 9.5px;
+    cursor: pointer;
+    padding: 2px 4px;
+    color: #94a3b8;
+    user-select: none;
+  }
+
+  .infoview-label::after {
+    content: ' ▾';
+    font-size: 10px;
+    color: #38bdf8;
+    margin-left: 4px;
+  }
+
+  #infoview-dock.open .infoview-label::after {
+    content: ' ▴';
+  }
+
+  .overlay-btn {
+    padding: 4px 6px;
+    font-size: 10.5px;
+  }
+
+  #hint-box {
+    display: none;
+  }
+
+  .autosave-toast {
+    bottom: 74px;
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%) translateY(12px);
+    font-size: 11px;
+    padding: 6px 12px;
+  }
+  .autosave-toast.show {
+    transform: translateX(-50%) translateY(0);
+  }
+
+  /* Modal on phone */
+  .modal-box {
+    padding: 18px 18px;
+    width: calc(100% - 24px);
+    border-radius: 16px;
+    gap: 12px;
+  }
+  .modal-title {
+    font-size: 15px;
+  }
+  .modal-body {
+    font-size: 12.5px;
+  }
+  .modal-btn {
+    padding: 8px 14px;
+    font-size: 12px;
+  }
+
+  /* Mobile Drive Virtual Pedals scaling */
+  .mobile-steer-cluster {
+    bottom: 16px;
+    left: 12px;
+    gap: 8px;
+  }
+  .steer-btn {
+    width: 52px;
+    height: 52px;
+    font-size: 20px;
+  }
+  .mobile-pedal-cluster {
+    bottom: 16px;
+    right: 12px;
+    gap: 8px;
+  }
+  .pedal-btn {
+    width: 60px;
+    height: 68px;
+    font-size: 11px;
+  }
+  .mobile-action-cluster {
+    bottom: 96px;
+    right: 12px;
+    gap: 6px;
+  }
+  .boost-pill, .drift-pill, .honk-pill {
+    padding: 6px 10px;
+    font-size: 10.5px;
+  }
+  .drive-cluster {
+    display: none; /* Hide bulky cluster to maximize phone road view */
+  }
+  .nitro-box {
+    position: absolute;
+    top: 64px;
+    left: 16px;
+    min-width: 110px;
+  }
+}
+
+/* ========================================================
+   LANDSCAPE PHONE ORIENTATION (HEIGHT < 500px)
+   ======================================================== */
+@media (max-height: 500px) {
+  #top-bar {
+    padding: 3px 8px;
+    gap: 4px;
+  }
+  .stat-pill {
+    padding: 2px 5px;
+  }
+  .stat-val {
+    font-size: 10px;
+  }
+  #bottom-dock {
+    bottom: 4px;
+    padding: 3px 6px;
+  }
+  .tool-btn {
+    min-width: 42px;
+    padding: 3px 6px;
+    gap: 2px;
+  }
+  .btn-icon {
+    font-size: 14px;
+  }
+  .btn-name {
+    font-size: 8.5px;
+  }
+  .road-submenu, .service-submenu, .rail-submenu {
+    bottom: 52px;
+    padding: 3px 6px;
+  }
+  .road-type-btn, .service-type-btn, .rail-type-btn {
+    padding: 3px 6px;
+  }
+  .mobile-steer-cluster {
+    bottom: 10px;
+    left: 10px;
+  }
+  .mobile-pedal-cluster {
+    bottom: 10px;
+    right: 10px;
+  }
+  .mobile-action-cluster {
+    bottom: 10px;
+    right: 160px;
+    flex-direction: row;
+  }
+  .steer-btn {
+    width: 48px;
+    height: 48px;
+  }
+  .pedal-btn {
+    width: 56px;
+    height: 52px;
   }
 }
 

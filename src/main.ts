@@ -326,6 +326,13 @@ class GameApp {
 
     // Overlay pills (CS2 Infoviews)
     const overlayButtons = document.querySelectorAll<HTMLButtonElement>('.overlay-btn');
+    const infoviewDock = document.getElementById('infoview-dock');
+    const infoviewLabel = infoviewDock?.querySelector('.infoview-label');
+
+    infoviewLabel?.addEventListener('click', () => {
+      infoviewDock?.classList.toggle('open');
+    });
+
     overlayButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
         const overlay = (btn.dataset.overlay || 'none') as ActiveOverlay;
@@ -336,6 +343,9 @@ class GameApp {
           overlayButtons.forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           this.world.setOverlay(overlay);
+        }
+        if (window.innerWidth <= 768) {
+          infoviewDock?.classList.remove('open');
         }
       });
     });
@@ -822,6 +832,82 @@ class GameApp {
     window.addEventListener('mouseup', () => {
       this.isMouseDown = false;
       this.lastClickedTile = '';
+    });
+
+    // Mobile 1-Finger Touch Interaction (Tap to place / Drag to paint or pan)
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let touchMoved = false;
+    let lastTouchX = 0;
+    let lastTouchY = 0;
+
+    canvas.addEventListener('touchstart', (e: TouchEvent) => {
+      if (this.driveMode.isActive) return;
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        touchStartX = t.clientX;
+        touchStartY = t.clientY;
+        lastTouchX = t.clientX;
+        lastTouchY = t.clientY;
+        touchMoved = false;
+        this.isMouseDown = true;
+
+        const tile = this.getTileFromPointer(t.clientX, t.clientY);
+        if (tile) {
+          const isValid = this.isActionValid(tile.x, tile.z);
+          const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+          const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
+          this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
+        }
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchmove', (e: TouchEvent) => {
+      if (this.driveMode.isActive) return;
+      if (e.touches.length === 1) {
+        const t = e.touches[0];
+        const distFromStart = Math.hypot(t.clientX - touchStartX, t.clientY - touchStartY);
+        if (distFromStart > 8) {
+          touchMoved = true;
+        }
+
+        if (this.currentTool === 'select') {
+          // In Inspect / Select mode: 1-finger drag pans camera smoothly!
+          const deltaX = t.clientX - lastTouchX;
+          const deltaY = t.clientY - lastTouchY;
+          this.controls.panBy(deltaX, deltaY);
+        } else {
+          // In building mode: update highlight and paint along path if moved to a new tile
+          const tile = this.getTileFromPointer(t.clientX, t.clientY);
+          if (tile) {
+            const isValid = this.isActionValid(tile.x, tile.z);
+            const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+            const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
+            this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
+
+            const tileKey = `${tile.x},${tile.z}`;
+            if (tileKey !== this.lastClickedTile) {
+              this.handleGridAction(t.clientX, t.clientY);
+            }
+          }
+        }
+        lastTouchX = t.clientX;
+        lastTouchY = t.clientY;
+      }
+    }, { passive: false });
+
+    canvas.addEventListener('touchend', (e: TouchEvent) => {
+      if (this.driveMode.isActive) return;
+      if (!touchMoved && e.changedTouches.length > 0) {
+        // Clean single tap action
+        const t = e.changedTouches[0];
+        this.handleGridAction(t.clientX, t.clientY);
+      }
+      this.isMouseDown = false;
+      this.lastClickedTile = '';
+      setTimeout(() => {
+        if (!this.isMouseDown) this.world.clearHighlight();
+      }, 600);
     });
   }
 
