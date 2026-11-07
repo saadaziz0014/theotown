@@ -37,6 +37,7 @@ export class CityWorld {
   public roadPreviewGroup: THREE.Group = new THREE.Group();
   public railPreviewGroup: THREE.Group = new THREE.Group();
   public utilityPreviewGroup: THREE.Group = new THREE.Group();
+  public multiHighlightGroup: THREE.Group = new THREE.Group();
   public pipesGroup: THREE.Group = new THREE.Group();
   public wiresGroup: THREE.Group = new THREE.Group();
   public coverageGroup: THREE.Group = new THREE.Group();
@@ -461,6 +462,9 @@ export class CityWorld {
 
     this.railPreviewGroup.visible = false;
     this.scene.add(this.railPreviewGroup);
+
+    this.multiHighlightGroup.visible = false;
+    this.scene.add(this.multiHighlightGroup);
   }
 
   public setHighlight(
@@ -593,6 +597,144 @@ export class CityWorld {
     this.roadPreviewGroup.visible = false;
     this.railPreviewGroup.visible = false;
     this.utilityPreviewGroup.visible = false;
+    this.multiHighlightGroup.visible = false;
+  }
+
+  public setPathHighlight(
+    tiles: { x: number; z: number }[],
+    valid: boolean = true,
+    tool: string = 'road',
+    explicitRoadType?: RoadType
+  ) {
+    if (!tiles || tiles.length === 0) {
+      this.clearHighlight();
+      return;
+    }
+
+    if (tiles.length === 1) {
+      this.multiHighlightGroup.clear();
+      this.multiHighlightGroup.visible = false;
+      this.setHighlight(tiles[0].x, tiles[0].z, valid, tool, explicitRoadType);
+      return;
+    }
+
+    // Multi-tile path preview
+    this.highlightMesh.visible = false;
+    this.roadPreviewGroup.clear();
+    this.railPreviewGroup.clear();
+    this.utilityPreviewGroup.clear();
+    this.multiHighlightGroup.clear();
+
+    const pathKeys = new Set(tiles.map(t => this.getKey(t.x, t.z)));
+
+    if (tool === 'road') {
+      for (let i = 0; i < tiles.length; i++) {
+        const { x, z } = tiles[i];
+        const key = this.getKey(x, z);
+        const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+
+        const northKey = this.getKey(x, z - 1);
+        const southKey = this.getKey(x, z + 1);
+        const eastKey = this.getKey(x + 1, z);
+        const westKey = this.getKey(x - 1, z);
+
+        let hasNorth = pathKeys.has(northKey) || this.roads.has(northKey);
+        let hasSouth = pathKeys.has(southKey) || this.roads.has(southKey);
+        let hasEast = pathKeys.has(eastKey) || this.roads.has(eastKey);
+        let hasWest = pathKeys.has(westKey) || this.roads.has(westKey);
+
+        if (!hasNorth && !hasSouth && !hasEast && !hasWest) {
+          hasEast = true;
+          hasWest = true;
+        }
+
+        const isWater = this.isWaterTile(x, z);
+        let effectiveType: RoadType = isWater ? 'bridge' : (explicitRoadType || 'suburban');
+        if (!isWater && effectiveType === 'bridge') {
+          effectiveType = 'suburban';
+        }
+
+        const previewMesh = VoxelRoadBuilder.buildRoadPreviewMesh(
+          effectiveType,
+          hasNorth,
+          hasSouth,
+          hasEast,
+          hasWest,
+          valid
+        );
+        previewMesh.position.set(x + 0.5, topY, z + 0.5);
+        this.roadPreviewGroup.add(previewMesh);
+      }
+      this.roadPreviewGroup.visible = true;
+    } else if (tool === 'rail') {
+      for (let i = 0; i < tiles.length; i++) {
+        const { x, z } = tiles[i];
+        const key = this.getKey(x, z);
+        const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+
+        const northKey = this.getKey(x, z - 1);
+        const southKey = this.getKey(x, z + 1);
+        const eastKey = this.getKey(x + 1, z);
+        const westKey = this.getKey(x - 1, z);
+
+        let hasNorth = pathKeys.has(northKey) || this.rails.has(northKey);
+        let hasSouth = pathKeys.has(southKey) || this.rails.has(southKey);
+        let hasEast = pathKeys.has(eastKey) || this.rails.has(eastKey);
+        let hasWest = pathKeys.has(westKey) || this.rails.has(westKey);
+
+        if (!hasNorth && !hasSouth && !hasEast && !hasWest) {
+          hasEast = true;
+          hasWest = true;
+        }
+
+        const previewMesh = VoxelRailBuilder.buildRailPreviewMesh(
+          hasNorth,
+          hasSouth,
+          hasEast,
+          hasWest,
+          valid
+        );
+        previewMesh.position.set(x + 0.5, topY, z + 0.5);
+        this.railPreviewGroup.add(previewMesh);
+      }
+      this.railPreviewGroup.visible = true;
+    } else if (tool === 'pipe' || tool === 'wire') {
+      for (const { x, z } of tiles) {
+        const key = this.getKey(x, z);
+        const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+        const preview = VoxelUtilityBuilder.buildCursorCoveragePreview(tool, 4);
+        preview.position.set(x + 0.5, topY, z + 0.5);
+        this.utilityPreviewGroup.add(preview);
+      }
+      this.utilityPreviewGroup.visible = true;
+    } else {
+      // Zoning (Residential, Commercial, Industrial) or Demolish
+      let color = valid ? 0xffffff : 0xef4444;
+      if (valid) {
+        if (tool === 'residential') color = 0x22c55e;
+        else if (tool === 'commercial') color = 0x38bdf8;
+        else if (tool === 'industrial') color = 0xf59e0b;
+        else if (tool === 'demolish') color = 0xef4444;
+      }
+
+      const planeGeo = new THREE.PlaneGeometry(0.96, 0.96);
+      planeGeo.rotateX(-Math.PI / 2);
+      const planeMat = new THREE.MeshBasicMaterial({
+        color,
+        transparent: true,
+        opacity: 0.52,
+        depthTest: true
+      });
+
+      for (const { x, z } of tiles) {
+        const key = this.getKey(x, z);
+        const topY = Math.max(0, this.baseTerrainHeights.get(key) ?? 0.0);
+        const mesh = new THREE.Mesh(planeGeo, planeMat);
+        mesh.position.set(x + 0.5, topY + 0.05, z + 0.5);
+        this.multiHighlightGroup.add(mesh);
+      }
+      this.multiHighlightGroup.visible = true;
+    }
   }
 
   public getTile(x: number, z: number): TileType {
