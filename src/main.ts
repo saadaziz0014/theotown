@@ -6,6 +6,7 @@ import { SERVICE_DEFS } from './serviceBuilder';
 import { CITY_PLANS } from './cityPlans';
 import { DriveModeController } from './driveMode';
 import { DriveSoundEngine } from './driveSound';
+import { generateBuildPath, calculatePathCost, type PathBuildMode, type TileCoord } from './pathBuilder';
 import type { RoadType, ServiceType, ActiveOverlay, BiomeType } from './types';
 import './style.css';
 
@@ -34,6 +35,25 @@ class GameApp {
   private isMouseDown = false;
   private lastClickedTile = '';
   private lastTime: number = performance.now();
+
+  // TheoTown Auto-Expand Path & Draw Modes
+  private pathBuildMode: PathBuildMode = 'straight';
+  private buildAnchorTile: TileCoord | null = null;
+  private isDraggingPath = false;
+  private dragStartCoord: { clientX: number; clientY: number } | null = null;
+  private activePathTiles: TileCoord[] = [];
+  private currentHoverTile: TileCoord | null = null;
+
+  private pathModeDock: HTMLElement | null = null;
+  private pathExpandBanner: HTMLElement | null = null;
+  private btnPathStraight: HTMLButtonElement | null = null;
+  private btnPathRounded: HTMLButtonElement | null = null;
+  private btnPathRect: HTMLButtonElement | null = null;
+  private bannerIcon: HTMLElement | null = null;
+  private bannerTitle: HTMLElement | null = null;
+  private bannerCount: HTMLElement | null = null;
+  private bannerCost: HTMLElement | null = null;
+  private btnCancelExpand: HTMLButtonElement | null = null;
 
   private confirmModalOverlay: HTMLElement | null = null;
   private modalTitleEl: HTMLElement | null = null;
@@ -240,6 +260,8 @@ class GameApp {
         toolButtons.forEach((b) => b.classList.remove('active'));
         btn.classList.add('active');
         this.currentTool = btn.dataset.tool as any;
+        this.clearActivePath();
+        this.updatePathModeDockVisibility();
 
         // Submenus visibility
         if (roadSubmenu) {
@@ -329,26 +351,70 @@ class GameApp {
     const infoviewDock = document.getElementById('infoview-dock');
     const infoviewLabel = infoviewDock?.querySelector('.infoview-label');
 
-    infoviewLabel?.addEventListener('click', () => {
+    infoviewLabel?.addEventListener('click', (e) => {
+      e.stopPropagation();
       infoviewDock?.classList.toggle('open');
     });
 
     overlayButtons.forEach((btn) => {
-      btn.addEventListener('click', () => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
         const overlay = (btn.dataset.overlay || 'none') as ActiveOverlay;
         if (btn.classList.contains('active')) {
           btn.classList.remove('active');
           this.world.setOverlay('none');
+          if (infoviewLabel) infoviewLabel.textContent = 'INFOVIEWS';
         } else {
           overlayButtons.forEach((b) => b.classList.remove('active'));
           btn.classList.add('active');
           this.world.setOverlay(overlay);
+          const overlayNames: Record<string, string> = {
+            power: '⚡ POWER',
+            water: '💧 WATER',
+            services: '🛡️ SERVICES',
+            happiness: '😊 HAPPY'
+          };
+          if (infoviewLabel) infoviewLabel.textContent = overlayNames[overlay] || overlay.toUpperCase();
         }
         if (window.innerWidth <= 768) {
           infoviewDock?.classList.remove('open');
         }
       });
     });
+
+    // TheoTown Path & Draw Mode Controls (Straight, Rounded, Area)
+    this.pathModeDock = document.getElementById('path-mode-dock');
+    this.pathExpandBanner = document.getElementById('path-expand-banner');
+    this.btnPathStraight = document.getElementById('btn-path-straight') as HTMLButtonElement;
+    this.btnPathRounded = document.getElementById('btn-path-rounded') as HTMLButtonElement;
+    this.btnPathRect = document.getElementById('btn-path-rect') as HTMLButtonElement;
+    this.bannerIcon = document.getElementById('banner-icon');
+    this.bannerTitle = document.getElementById('banner-title');
+    this.bannerCount = document.getElementById('banner-count');
+    this.bannerCost = document.getElementById('banner-cost');
+    this.btnCancelExpand = document.getElementById('btn-cancel-expand') as HTMLButtonElement;
+
+    this.btnPathStraight?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setPathBuildMode('straight');
+    });
+
+    this.btnPathRounded?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setPathBuildMode('rounded');
+    });
+
+    this.btnPathRect?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.setPathBuildMode('rectangle');
+    });
+
+    this.btnCancelExpand?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      this.clearActivePath();
+    });
+
+    this.updatePathModeDockVisibility();
 
     // Custom Dropdown Controls (Plans, Biomes & Land Patch Sizes)
     const planDropdownBtn = document.getElementById('btn-plan-dropdown');
@@ -366,11 +432,31 @@ class GameApp {
     const sizeDropdownText = document.getElementById('size-dropdown-text');
     const sizeDropdownIcon = document.getElementById('size-dropdown-icon');
 
+    const optionsModal = document.getElementById('city-options-modal');
+    const optionsBtn = document.getElementById('btn-city-options');
+    const optionsCloseBtn = document.getElementById('btn-close-options');
+
     const closeAllDropdowns = () => {
       planDropdownMenu?.classList.remove('open');
       biomeDropdownMenu?.classList.remove('open');
       sizeDropdownMenu?.classList.remove('open');
+      optionsModal?.classList.remove('active');
     };
+
+    optionsBtn?.addEventListener('click', (e) => {
+      e.stopPropagation();
+      optionsModal?.classList.add('active');
+    });
+
+    optionsCloseBtn?.addEventListener('click', () => {
+      optionsModal?.classList.remove('active');
+    });
+
+    optionsModal?.addEventListener('click', (e) => {
+      if (e.target === optionsModal) {
+        optionsModal.classList.remove('active');
+      }
+    });
 
     planDropdownBtn?.addEventListener('click', (e) => {
       e.stopPropagation();
@@ -393,13 +479,17 @@ class GameApp {
       if (!isOpen) sizeDropdownMenu?.classList.add('open');
     });
 
-    window.addEventListener('click', () => {
+    window.addEventListener('click', (e) => {
       closeAllDropdowns();
+      if (window.innerWidth <= 768 && !infoviewDock?.contains(e.target as Node)) {
+        infoviewDock?.classList.remove('open');
+      }
     });
 
     planDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
     biomeDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
     sizeDropdownMenu?.addEventListener('click', (e) => e.stopPropagation());
+    infoviewDock?.addEventListener('click', (e) => e.stopPropagation());
 
     // Predefined City Plans Loader
     const planButtons = document.querySelectorAll<HTMLButtonElement>('.plan-pill-btn');
@@ -414,7 +504,7 @@ class GameApp {
         const executeLoadPlan = () => {
           planButtons.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          if (planDropdownText) planDropdownText.textContent = `Plans: ${planName}`;
+          if (planDropdownText) planDropdownText.textContent = planName;
           if (planDropdownIcon) planDropdownIcon.textContent = planIcon;
           closeAllDropdowns();
           plan.load(this.world);
@@ -451,7 +541,7 @@ class GameApp {
         const executeChangeBiome = () => {
           biomeButtons.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          if (biomeDropdownText) biomeDropdownText.textContent = `Area: ${biomeName}`;
+          if (biomeDropdownText) biomeDropdownText.textContent = biomeName;
           if (biomeDropdownIcon) biomeDropdownIcon.textContent = biomeIcon;
           closeAllDropdowns();
           this.world.generateBiome(biome);
@@ -492,7 +582,7 @@ class GameApp {
         const executeResizePatch = () => {
           sizeButtons.forEach(b => b.classList.remove('active'));
           btn.classList.add('active');
-          if (sizeDropdownText) sizeDropdownText.textContent = `Patch: ${shortName}`;
+          if (sizeDropdownText) sizeDropdownText.textContent = shortName;
           if (sizeDropdownIcon) sizeDropdownIcon.textContent = sizeIcon;
           closeAllDropdowns();
 
@@ -556,6 +646,10 @@ class GameApp {
 
     // Simulation Speed buttons (Calibrated: 1x = 0.5x relaxing real-time pace, 2x = 2x fast, 3x = 4x super fast)
     const speedButtons = document.querySelectorAll<HTMLButtonElement>('.speed-btn');
+    const speedCycleBtn = document.getElementById('btn-speed-cycle');
+    const speedCycleText = document.getElementById('speed-cycle-text');
+    const speedCycleIcon = speedCycleBtn?.querySelector('.speed-cycle-icon');
+
     const speedMap: Record<string, number> = {
       '0': 0,
       '1': 0.5, // gentle, relaxing, realistic city pace
@@ -563,13 +657,30 @@ class GameApp {
       '3': 4.0  // super fast forward
     };
 
+    const updateSpeedCycleUI = (key: string) => {
+      const iconMap: Record<string, string> = { '0': '⏸', '1': '▶', '2': '▶▶', '3': '▶▶▶' };
+      const textMap: Record<string, string> = { '0': 'Pause', '1': '1x', '2': '2x', '3': '3x' };
+      if (speedCycleIcon) speedCycleIcon.textContent = iconMap[key] || '▶';
+      if (speedCycleText) speedCycleText.textContent = textMap[key] || '1x';
+      speedButtons.forEach((b) => {
+        b.classList.toggle('active', b.dataset.speed === key);
+      });
+    };
+
     speedButtons.forEach((btn) => {
       btn.addEventListener('click', () => {
-        speedButtons.forEach((b) => b.classList.remove('active'));
-        btn.classList.add('active');
         const speedKey = btn.dataset.speed || '1';
+        updateSpeedCycleUI(speedKey);
         this.world.stats.gameSpeed = speedMap[speedKey] ?? 0.5;
       });
+    });
+
+    speedCycleBtn?.addEventListener('click', () => {
+      const activeBtn = Array.from(speedButtons).find(b => b.classList.contains('active'));
+      const curKey = activeBtn?.dataset.speed || '1';
+      const nextKey = curKey === '1' ? '2' : curKey === '2' ? '3' : curKey === '3' ? '0' : '1';
+      updateSpeedCycleUI(nextKey);
+      this.world.stats.gameSpeed = speedMap[nextKey] ?? 0.5;
     });
 
     // Pocket City Drive Mode Launcher
@@ -604,6 +715,27 @@ class GameApp {
       }
 
       if (this.driveMode.isActive) return;
+
+      if (e.key === 'Escape') {
+        if (this.buildAnchorTile) {
+          this.clearActivePath();
+          return;
+        }
+      }
+
+      if (e.key === 'Tab' || e.key === 'c' || e.key === 'C') {
+        if (this.isExpandableTool(this.currentTool)) {
+          e.preventDefault();
+          const isZone = this.currentTool === 'residential' || this.currentTool === 'commercial' || this.currentTool === 'industrial';
+          if (this.pathBuildMode === 'straight') {
+            this.setPathBuildMode('rounded');
+          } else if (this.pathBuildMode === 'rounded') {
+            this.setPathBuildMode(isZone ? 'rectangle' : 'straight');
+          } else {
+            this.setPathBuildMode('straight');
+          }
+        }
+      }
 
       if (e.key === 'r' || e.key === 'R') this.selectTool('road');
       if (e.key === 'l' || e.key === 'L') this.selectTool('rail');
@@ -681,7 +813,7 @@ class GameApp {
     const bInfo = biomeNameMap[this.world.currentBiome] || biomeNameMap.valley;
     const biomeDropdownText = document.getElementById('biome-dropdown-text');
     const biomeDropdownIcon = document.getElementById('biome-dropdown-icon');
-    if (biomeDropdownText) biomeDropdownText.textContent = `Area: ${bInfo.name}`;
+    if (biomeDropdownText) biomeDropdownText.textContent = bInfo.name;
     if (biomeDropdownIcon) biomeDropdownIcon.textContent = bInfo.icon;
     const biomeButtons = document.querySelectorAll<HTMLButtonElement>('.biome-pill-btn');
     biomeButtons.forEach(b => {
@@ -716,7 +848,7 @@ class GameApp {
     const sInfo = sizeMap[this.world.size] || sizeMap[64];
     const sizeDropdownText = document.getElementById('size-dropdown-text');
     const sizeDropdownIcon = document.getElementById('size-dropdown-icon');
-    if (sizeDropdownText) sizeDropdownText.textContent = `Patch: ${sInfo.short}`;
+    if (sizeDropdownText) sizeDropdownText.textContent = sInfo.short;
     if (sizeDropdownIcon) sizeDropdownIcon.textContent = sInfo.icon;
     const sizeButtons = document.querySelectorAll<HTMLButtonElement>('.size-pill-btn');
     sizeButtons.forEach(b => {
@@ -741,8 +873,25 @@ class GameApp {
     const waterSubEl = document.getElementById('stat-water-sub');
     const flowEl = document.getElementById('stat-flow');
 
-    if (moneyEl) moneyEl.textContent = `$${this.world.stats.money.toLocaleString()}`;
-    if (popEl) popEl.textContent = this.world.stats.population.toLocaleString();
+    const isMobile = window.innerWidth <= 768;
+
+    if (moneyEl) {
+      const m = this.world.stats.money;
+      if (isMobile) {
+        moneyEl.textContent = m >= 1_000_000 ? `$${(m / 1_000_000).toFixed(1)}M` : m >= 10_000 ? `$${Math.round(m / 1_000)}K` : `$${m}`;
+      } else {
+        moneyEl.textContent = `$${m.toLocaleString()}`;
+      }
+    }
+
+    if (popEl) {
+      const p = this.world.stats.population;
+      if (isMobile) {
+        popEl.textContent = p >= 1_000_000 ? `${(p / 1_000_000).toFixed(1)}M` : p >= 10_000 ? `${(p / 1_000).toFixed(0)}K` : `${p}`;
+      } else {
+        popEl.textContent = p.toLocaleString();
+      }
+    }
 
     // Format 24-hr clock (e.g. 13:06)
     const hours = Math.floor(this.world.stats.timeOfDay);
@@ -757,7 +906,11 @@ class GameApp {
     if (happyEl) happyEl.textContent = `${this.world.stats.happiness}% Happy`;
 
     if (powerEl) {
-      powerEl.textContent = `${this.world.stats.powerDemand}/${this.world.stats.powerCapacity} MW`;
+      if (isMobile) {
+        powerEl.textContent = `${this.world.stats.powerCapacity}MW`;
+      } else {
+        powerEl.textContent = `${this.world.stats.powerDemand}/${this.world.stats.powerCapacity} MW`;
+      }
     }
     if (powerSubEl) {
       powerSubEl.textContent = `${this.world.stats.powerCoveredPct}% Grid`;
@@ -765,7 +918,11 @@ class GameApp {
     }
 
     if (waterEl) {
-      waterEl.textContent = `${this.world.stats.waterDemand}/${this.world.stats.waterCapacity} m³`;
+      if (isMobile) {
+        waterEl.textContent = `${this.world.stats.waterCapacity}m³`;
+      } else {
+        waterEl.textContent = `${this.world.stats.waterDemand}/${this.world.stats.waterCapacity} m³`;
+      }
     }
     if (waterSubEl) {
       waterSubEl.textContent = `${this.world.stats.waterCoveredPct}% Pipes`;
@@ -787,54 +944,267 @@ class GameApp {
     if (barInd) barInd.style.height = `${Math.min(100, Math.max(12, this.world.stats.demandInd))}%`;
   }
 
+  private isExpandableTool(tool: string): boolean {
+    if (tool === 'road' || tool === 'residential' || tool === 'commercial' || tool === 'industrial' || tool === 'pipe' || tool === 'wire' || tool === 'demolish') {
+      return true;
+    }
+    if (tool === 'rail' && this.selectedRailType === 'track') {
+      return true;
+    }
+    return false;
+  }
+
+  private updatePathModeDockVisibility() {
+    if (!this.pathModeDock) return;
+    const isExpandable = this.isExpandableTool(this.currentTool);
+    this.pathModeDock.classList.toggle('visible', isExpandable);
+
+    const hasSubmenu = this.currentTool === 'road' || this.currentTool === 'rail' || this.currentTool === 'service';
+    this.pathModeDock.classList.toggle('no-submenu', !hasSubmenu);
+    this.pathExpandBanner?.classList.toggle('no-submenu', !hasSubmenu);
+
+    const isZone = this.currentTool === 'residential' || this.currentTool === 'commercial' || this.currentTool === 'industrial';
+    this.btnPathRect?.classList.toggle('visible', isZone);
+
+    if (!isZone && this.pathBuildMode === 'rectangle') {
+      this.setPathBuildMode('straight');
+    }
+  }
+
+  private setPathBuildMode(mode: PathBuildMode) {
+    this.pathBuildMode = mode;
+    this.btnPathStraight?.classList.toggle('active', mode === 'straight');
+    this.btnPathRounded?.classList.toggle('active', mode === 'rounded');
+    this.btnPathRect?.classList.toggle('active', mode === 'rectangle');
+
+    if (this.buildAnchorTile && this.currentHoverTile) {
+      this.updatePathPreview(this.currentHoverTile);
+    }
+  }
+
+  private updatePathPreview(targetTile: TileCoord) {
+    if (!this.buildAnchorTile) return;
+
+    this.activePathTiles = generateBuildPath(
+      this.buildAnchorTile,
+      targetTile,
+      this.pathBuildMode,
+      this.world.size
+    );
+
+    const costInfo = calculatePathCost(this.currentTool, this.selectedRoadType, this.activePathTiles.length);
+    const canAfford = this.currentTool === 'demolish' || this.world.stats.money >= costInfo.totalCost;
+
+    const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+    this.world.setPathHighlight(this.activePathTiles, canAfford, this.currentTool, explicitType);
+
+    if (this.pathExpandBanner) {
+      this.pathExpandBanner.classList.add('visible');
+      const hasSubmenu = this.currentTool === 'road' || this.currentTool === 'rail' || this.currentTool === 'service';
+      this.pathExpandBanner.classList.toggle('no-submenu', !hasSubmenu);
+
+      if (this.bannerIcon) this.bannerIcon.textContent = costInfo.icon;
+      if (this.bannerTitle) this.bannerTitle.textContent = costInfo.toolLabel;
+      if (this.bannerCount) this.bannerCount.textContent = `${this.activePathTiles.length} tile${this.activePathTiles.length === 1 ? '' : 's'}`;
+      if (this.bannerCost) {
+        this.bannerCost.textContent = costInfo.totalCost > 0 ? `$${costInfo.totalCost.toLocaleString()}` : 'Free';
+        this.bannerCost.classList.toggle('invalid', !canAfford);
+      }
+    }
+  }
+
+  private executePathBuild() {
+    if (!this.buildAnchorTile || this.activePathTiles.length === 0) {
+      this.clearActivePath();
+      return;
+    }
+
+    const tiles = [...this.activePathTiles];
+    const costInfo = calculatePathCost(this.currentTool, this.selectedRoadType, tiles.length);
+
+    if (this.world.stats.money < costInfo.totalCost && this.currentTool !== 'demolish') {
+      this.showAutosaveToast(`⚠️ Need $${costInfo.totalCost.toLocaleString()} (have $${Math.floor(this.world.stats.money).toLocaleString()})`);
+      this.clearActivePath();
+      return;
+    }
+
+    let builtCount = 0;
+    const tool = this.currentTool;
+
+    for (const { x, z } of tiles) {
+      switch (tool) {
+        case 'road': {
+          const isWater = this.world.isWaterTile(x, z);
+          let roadTypeToPlace = this.selectedRoadType;
+          const autoMatch = !this.userExplicitRoadType;
+          if (isWater && autoMatch) {
+            roadTypeToPlace = 'bridge';
+          } else if (!isWater && roadTypeToPlace === 'bridge') {
+            roadTypeToPlace = 'suburban';
+          }
+          if (this.world.placeRoad(x, z, roadTypeToPlace, autoMatch)) {
+            builtCount++;
+          }
+          break;
+        }
+        case 'rail': {
+          if (this.selectedRailType === 'track') {
+            if (this.world.placeRail(x, z)) builtCount++;
+          }
+          break;
+        }
+        case 'pipe': {
+          if (this.world.placePipe(x, z, 5)) builtCount++;
+          break;
+        }
+        case 'wire': {
+          if (this.world.placeWire(x, z, 5)) builtCount++;
+          break;
+        }
+        case 'residential': {
+          if (this.world.placeZone(x, z, 'residential')) builtCount++;
+          break;
+        }
+        case 'commercial': {
+          if (this.world.placeZone(x, z, 'commercial')) builtCount++;
+          break;
+        }
+        case 'industrial': {
+          if (this.world.placeZone(x, z, 'industrial')) builtCount++;
+          break;
+        }
+        case 'demolish': {
+          this.world.demolish(x, z);
+          builtCount++;
+          break;
+        }
+      }
+    }
+
+    if (builtCount > 0) {
+      if (tool === 'demolish') {
+        this.world.soundEngine?.playDemolish?.();
+      } else {
+        this.world.soundEngine?.playBuild?.();
+      }
+
+      if (builtCount >= 2) {
+        this.showAutosaveToast(`Built ${builtCount} tiles of ${costInfo.toolLabel} ($${costInfo.totalCost.toLocaleString()})`);
+      }
+    }
+
+    this.clearActivePath();
+    this.updateUIStats();
+    this.scheduleAutosave();
+  }
+
+  private clearActivePath() {
+    this.buildAnchorTile = null;
+    this.isDraggingPath = false;
+    this.dragStartCoord = null;
+    this.activePathTiles = [];
+    if (this.pathExpandBanner) {
+      this.pathExpandBanner.classList.remove('visible');
+    }
+    this.world.clearHighlight();
+  }
+
   private setupInteractions() {
     const canvas = this.renderer.domElement;
 
+    // Prevent context menu on right click so right-click can cancel active path
+    canvas.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      if (this.buildAnchorTile) {
+        this.clearActivePath();
+      }
+    });
+
     canvas.addEventListener('mousedown', (e) => {
       if (this.driveMode.isActive) return;
-      // If holding space (Illustrator hand tool), don't build or demolish
       if (this.controls.isSpacePressed) return;
 
       if (e.button === 0) {
-        this.isMouseDown = true;
-        this.handleGridAction(e.clientX, e.clientY);
+        const tile = this.getTileFromPointer(e.clientX, e.clientY);
+        if (!tile) return;
+
+        if (this.isExpandableTool(this.currentTool)) {
+          if (!this.buildAnchorTile) {
+            // First click: anchor start
+            this.buildAnchorTile = { x: tile.x, z: tile.z };
+            this.dragStartCoord = { clientX: e.clientX, clientY: e.clientY };
+            this.isMouseDown = true;
+            this.isDraggingPath = false;
+            this.updatePathPreview(tile);
+          } else {
+            // Second click: commit the path!
+            this.updatePathPreview(tile);
+            this.executePathBuild();
+          }
+        } else {
+          // Standard single tile action (e.g. Services, Station, Move)
+          this.isMouseDown = true;
+          this.handleGridAction(e.clientX, e.clientY);
+        }
+      } else if (e.button === 2) {
+        if (this.buildAnchorTile) {
+          this.clearActivePath();
+        }
       }
     });
 
     canvas.addEventListener('mousemove', (e) => {
-      if (this.driveMode.isActive) {
-        this.world.clearHighlight();
-        return;
-      }
-      if (this.controls.isSpacePressed) {
+      if (this.driveMode.isActive || this.controls.isSpacePressed) {
         this.world.clearHighlight();
         return;
       }
       const tile = this.getTileFromPointer(e.clientX, e.clientY);
-      if (tile) {
-        const { x: tileX, z: tileZ } = tile;
-        const isValid = this.isActionValid(tileX, tileZ);
-        const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+      if (!tile) {
+        if (!this.buildAnchorTile) this.world.clearHighlight();
+        return;
+      }
+      this.currentHoverTile = tile;
+
+      if (this.isExpandableTool(this.currentTool)) {
+        if (this.buildAnchorTile) {
+          if (this.isMouseDown && this.dragStartCoord) {
+            const dist = Math.hypot(e.clientX - this.dragStartCoord.clientX, e.clientY - this.dragStartCoord.clientY);
+            if (dist > 8) {
+              this.isDraggingPath = true;
+            }
+          }
+          this.updatePathPreview(tile);
+        } else {
+          const isValid = this.isActionValid(tile.x, tile.z);
+          const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+          this.world.setHighlight(tile.x, tile.z, isValid, this.currentTool, explicitType);
+        }
+      } else {
+        const isValid = this.isActionValid(tile.x, tile.z);
         const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
-        this.world.setHighlight(tileX, tileZ, isValid, highlightTool, explicitType);
+        this.world.setHighlight(tile.x, tile.z, isValid, highlightTool);
 
         if (this.isMouseDown) {
-          const tileKey = `${tileX},${tileZ}`;
+          const tileKey = `${tile.x},${tile.z}`;
           if (tileKey !== this.lastClickedTile) {
             this.handleGridAction(e.clientX, e.clientY);
           }
         }
-      } else {
-        this.world.clearHighlight();
       }
     });
 
     window.addEventListener('mouseup', () => {
+      if (this.isDraggingPath && this.buildAnchorTile) {
+        // Dragged across tiles and released -> commit the path!
+        this.executePathBuild();
+      }
       this.isMouseDown = false;
+      this.isDraggingPath = false;
+      this.dragStartCoord = null;
       this.lastClickedTile = '';
     });
 
-    // Mobile 1-Finger Touch Interaction (Tap to place / Drag to paint or pan)
+    // Mobile Touch Interaction
     let touchStartX = 0;
     let touchStartY = 0;
     let touchMoved = false;
@@ -854,10 +1224,22 @@ class GameApp {
 
         const tile = this.getTileFromPointer(t.clientX, t.clientY);
         if (tile) {
-          const isValid = this.isActionValid(tile.x, tile.z);
-          const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
-          const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
-          this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
+          this.currentHoverTile = tile;
+          if (this.isExpandableTool(this.currentTool)) {
+            if (!this.buildAnchorTile) {
+              this.buildAnchorTile = { x: tile.x, z: tile.z };
+              this.dragStartCoord = { clientX: t.clientX, clientY: t.clientY };
+              this.updatePathPreview(tile);
+            } else {
+              this.updatePathPreview(tile);
+              this.executePathBuild();
+            }
+          } else {
+            const isValid = this.isActionValid(tile.x, tile.z);
+            const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+            const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
+            this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
+          }
         }
       }
     }, { passive: false });
@@ -872,22 +1254,21 @@ class GameApp {
         }
 
         if (this.currentTool === 'select') {
-          // In Inspect / Select mode: 1-finger drag pans camera smoothly!
           const deltaX = t.clientX - lastTouchX;
           const deltaY = t.clientY - lastTouchY;
           this.controls.panBy(deltaX, deltaY);
         } else {
-          // In building mode: update highlight and paint along path if moved to a new tile
           const tile = this.getTileFromPointer(t.clientX, t.clientY);
           if (tile) {
-            const isValid = this.isActionValid(tile.x, tile.z);
-            const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
-            const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
-            this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
-
-            const tileKey = `${tile.x},${tile.z}`;
-            if (tileKey !== this.lastClickedTile) {
-              this.handleGridAction(t.clientX, t.clientY);
+            this.currentHoverTile = tile;
+            if (this.isExpandableTool(this.currentTool) && this.buildAnchorTile) {
+              this.isDraggingPath = true;
+              this.updatePathPreview(tile);
+            } else if (!this.buildAnchorTile) {
+              const isValid = this.isActionValid(tile.x, tile.z);
+              const explicitType = this.userExplicitRoadType ? this.selectedRoadType : undefined;
+              const highlightTool = (this.currentTool === 'rail' && this.selectedRailType !== 'track') ? 'service' : this.currentTool;
+              this.world.setHighlight(tile.x, tile.z, isValid, highlightTool, explicitType);
             }
           }
         }
@@ -898,16 +1279,17 @@ class GameApp {
 
     canvas.addEventListener('touchend', (e: TouchEvent) => {
       if (this.driveMode.isActive) return;
-      if (!touchMoved && e.changedTouches.length > 0) {
-        // Clean single tap action
+      if (this.isExpandableTool(this.currentTool)) {
+        if (this.isDraggingPath && this.buildAnchorTile) {
+          this.executePathBuild();
+        }
+      } else if (!touchMoved && e.changedTouches.length > 0) {
         const t = e.changedTouches[0];
         this.handleGridAction(t.clientX, t.clientY);
       }
       this.isMouseDown = false;
+      this.isDraggingPath = false;
       this.lastClickedTile = '';
-      setTimeout(() => {
-        if (!this.isMouseDown) this.world.clearHighlight();
-      }, 600);
     });
   }
 

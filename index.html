@@ -91,8 +91,8 @@
             </div>
           </div>
 
-          <!-- Simulation Speed Controls -->
-          <div class="speed-controls">
+          <!-- Simulation Speed Controls (Desktop 4-button group) -->
+          <div class="speed-controls desktop-only-speed">
             <button class="speed-btn" data-speed="0" title="Pause">⏸</button>
             <button class="speed-btn active" data-speed="1" title="1x Speed">▶</button>
             <button class="speed-btn" data-speed="2" title="2x Speed">▶▶</button>
@@ -101,11 +101,11 @@
         </div>
 
         <div class="top-bar-right">
-          <!-- Predefined City Plans Dropdown Selector -->
-          <div class="custom-dropdown" id="plan-dropdown-container">
-            <button class="dropdown-trigger-btn" id="btn-plan-dropdown" title="Predefined Starter City Layouts">
+          <!-- Predefined City Plans Dropdown Selector (Desktop) -->
+          <div class="custom-dropdown desktop-only-dropdown" id="plan-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-plan-dropdown" title="Starter City Blueprint (Current: Blank Canvas)">
               <span class="dropdown-icon" id="plan-dropdown-icon">🌱</span>
-              <span class="dropdown-text" id="plan-dropdown-text">Plans: Blank</span>
+              <span class="dropdown-text" id="plan-dropdown-text">Blank</span>
               <span class="dropdown-chevron">▾</span>
             </button>
             <div class="dropdown-menu" id="plan-dropdown-menu">
@@ -148,11 +148,11 @@
             </div>
           </div>
 
-          <!-- Biome / Area Terrain Selector -->
-          <div class="custom-dropdown" id="biome-dropdown-container">
-            <button class="dropdown-trigger-btn" id="btn-biome-dropdown" title="Choose Area / Biome Terrain">
+          <!-- Biome / Area Terrain Selector (Desktop) -->
+          <div class="custom-dropdown desktop-only-dropdown" id="biome-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-biome-dropdown" title="Terrain Biome (Current: Valley)">
               <span class="dropdown-icon" id="biome-dropdown-icon">🌿</span>
-              <span class="dropdown-text" id="biome-dropdown-text">Area: Valley</span>
+              <span class="dropdown-text" id="biome-dropdown-text">Valley</span>
               <span class="dropdown-chevron">▾</span>
             </button>
             <div class="dropdown-menu" id="biome-dropdown-menu">
@@ -195,11 +195,11 @@
             </div>
           </div>
 
-          <!-- Land Patch / City Map Size Selector -->
-          <div class="custom-dropdown" id="size-dropdown-container">
-            <button class="dropdown-trigger-btn" id="btn-size-dropdown" title="Choose Land Patch Size (Small, Medium, Large, Extra Large)">
-              <span class="dropdown-icon" id="size-dropdown-icon">📐</span>
-              <span class="dropdown-text" id="size-dropdown-text">Patch: Medium</span>
+          <!-- Land Patch / City Map Size Selector (Desktop) -->
+          <div class="custom-dropdown desktop-only-dropdown" id="size-dropdown-container">
+            <button class="dropdown-trigger-btn" id="btn-size-dropdown" title="Map Patch Size (Current: Medium 64×64)">
+              <span class="dropdown-icon" id="size-dropdown-icon">◻️</span>
+              <span class="dropdown-text" id="size-dropdown-text">Medium</span>
               <span class="dropdown-chevron">▾</span>
             </button>
             <div class="dropdown-menu" id="size-dropdown-menu">
@@ -235,22 +235,63 @@
             </div>
           </div>
 
+          <!-- Mobile Compact Speed Toggle (Cycles: 1x -> 2x -> 3x -> Pause) -->
+          <button id="btn-speed-cycle" class="speed-cycle-btn mobile-only-btn" title="Cycle Game Speed">
+            <span class="speed-cycle-icon">▶</span>
+            <span class="speed-cycle-text" id="speed-cycle-text">1x</span>
+          </button>
+
           <!-- Pocket City Free Roam Drive Mode Button -->
           <button id="btn-drive-mode" class="drive-mode-launch-btn" title="Explore your city from street level in Drive Mode! (Shortcut: T)">
             <span class="drive-icon">🚗</span>
-            <span class="drive-text">Drive Mode</span>
+            <span class="drive-text">Drive</span>
             <span class="drive-badge-key">T</span>
+          </button>
+
+          <!-- TheoTown City Options & Blueprints Button -->
+          <button id="btn-city-options" class="city-options-btn" title="City Settings, Blueprints, Biomes & Map Patch Size">
+            <span class="options-icon">⚙️</span>
+            <span class="options-text">Menu</span>
           </button>
         </div>
       </header>
 
-      <!-- CS2 Infoviews Overlay Filter Bar (Right-side Pills) -->
+      <!-- CS2 Infoviews Overlay Filter Bar (Left-side Pills - Safe from Netlify) -->
       <div id="infoview-dock">
-        <span class="infoview-label">INFOVIEWS</span>
+        <span class="infoview-label" role="button" tabindex="0" title="Toggle City Infoviews">INFOVIEWS</span>
         <button class="overlay-btn" data-overlay="power" title="Electricity Grid Overlay">⚡ Power</button>
         <button class="overlay-btn" data-overlay="water" title="Water Pipes Overlay">💧 Water</button>
         <button class="overlay-btn" data-overlay="services" title="Public Safety & Health Coverage">🛡️ Services</button>
         <button class="overlay-btn" data-overlay="happiness" title="Citizen Happiness Heatmap">😊 Happiness</button>
+      </div>
+
+      <!-- TheoTown Auto-Expand Path Mode Selector Dock -->
+      <div id="path-mode-dock" class="path-mode-dock visible">
+        <span class="path-mode-label">PATH:</span>
+        <button class="path-mode-btn active" id="btn-path-straight" data-mode="straight" title="Straight Path: Align in a clean orthogonal line/row (Shortcut: Tab)">
+          <span class="path-icon">📏</span>
+          <span class="path-title">Straight</span>
+        </button>
+        <button class="path-mode-btn" id="btn-path-rounded" data-mode="rounded" title="Rounded Path: Auto-expand with smooth corner turns & curves (Shortcut: Tab)">
+          <span class="path-icon">↪️</span>
+          <span class="path-title">Rounded</span>
+        </button>
+        <button class="path-mode-btn zone-mode-only" id="btn-path-rect" data-mode="rectangle" title="Area Fill: Expand a filled rectangular city block">
+          <span class="path-icon">⬜</span>
+          <span class="path-title">Area</span>
+        </button>
+      </div>
+
+      <!-- Live Auto-Expansion Floating Status Banner -->
+      <div id="path-expand-banner" class="path-expand-banner">
+        <div class="banner-pill">
+          <span class="banner-icon" id="banner-icon">🛣️</span>
+          <span class="banner-title" id="banner-title">Suburban Road</span>
+          <span class="banner-count" id="banner-count">12 tiles</span>
+          <span class="banner-cost" id="banner-cost">$180</span>
+          <span class="banner-action-hint">[Click to Confirm • ESC to Cancel]</span>
+          <button class="banner-cancel-btn" id="btn-cancel-expand" title="Cancel Path (ESC)">✕</button>
+        </div>
       </div>
 
       <!-- Road Type Submenu Dock -->
@@ -483,6 +524,139 @@
           <div class="modal-actions">
             <button id="modal-cancel-btn" class="modal-btn secondary">Cancel</button>
             <button id="modal-confirm-btn" class="modal-btn danger">Proceed &amp; Regenerate</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- City Options & Blueprints Modal Drawer (TheoTown Style) -->
+      <div id="city-options-modal" class="modal-overlay">
+        <div class="modal-box city-options-modal-box">
+          <div class="modal-header">
+            <div class="options-header-left">
+              <span class="modal-icon">⚙️</span>
+              <h3 class="modal-title">City Options &amp; Blueprints</h3>
+            </div>
+            <button id="btn-close-options" class="modal-close-x" aria-label="Close">✕</button>
+          </div>
+          <div class="city-options-scrollable-body">
+            <!-- Section 1: Starter Blueprints -->
+            <div class="options-drawer-section">
+              <div class="options-drawer-title">🌱 STARTER BLUEPRINTS</div>
+              <div class="options-drawer-grid">
+                <button class="option-card plan-pill-btn active" data-plan-id="clear" data-name="Blank" data-icon="🌱">
+                  <span class="option-card-icon">🌱</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Blank Canvas</span>
+                    <span class="option-card-desc">Plain untouched virgin terrain</span>
+                  </div>
+                </button>
+                <button class="option-card plan-pill-btn" data-plan-id="curved_boulevard" data-name="Curved Bay" data-icon="🔄">
+                  <span class="option-card-icon">🔄</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Curved Bay</span>
+                    <span class="option-card-desc">Scenic curved loops &amp; emerald coast</span>
+                  </div>
+                </button>
+                <button class="option-card plan-pill-btn" data-plan-id="suburban_garden" data-name="Garden City" data-icon="🏡">
+                  <span class="option-card-icon">🏡</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Garden City</span>
+                    <span class="option-card-desc">Tree-lined suburban crescent loops</span>
+                  </div>
+                </button>
+                <button class="option-card plan-pill-btn" data-plan-id="metro_expressway" data-name="Metropolis" data-icon="🌉">
+                  <span class="option-card-icon">🌉</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Metropolis</span>
+                    <span class="option-card-desc">Elevated highway &amp; downtown skyline</span>
+                  </div>
+                </button>
+                <button class="option-card plan-pill-btn" data-plan-id="river_valley" data-name="Tech Port" data-icon="🏭">
+                  <span class="option-card-icon">🏭</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Tech Port</span>
+                    <span class="option-card-desc">Industrial harbor &amp; clean tech district</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Section 2: Terrain Biomes -->
+            <div class="options-drawer-section">
+              <div class="options-drawer-title">🌿 TERRAIN BIOMES</div>
+              <div class="options-drawer-grid">
+                <button class="option-card biome-pill-btn active" data-biome="valley" data-name="Valley" data-icon="🌿">
+                  <span class="option-card-icon">🌿</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Valley</span>
+                    <span class="option-card-desc">Lush rolling hills &amp; winding river</span>
+                  </div>
+                </button>
+                <button class="option-card biome-pill-btn" data-biome="mountains" data-name="Mountains" data-icon="⛰️">
+                  <span class="option-card-icon">⛰️</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Mountains</span>
+                    <span class="option-card-desc">Stone cliffs, pass &amp; alpine crater lake</span>
+                  </div>
+                </button>
+                <button class="option-card biome-pill-btn" data-biome="desert" data-name="Desert" data-icon="🏜️">
+                  <span class="option-card-icon">🏜️</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Desert</span>
+                    <span class="option-card-desc">Golden dunes, canyons &amp; palm oasis</span>
+                  </div>
+                </button>
+                <button class="option-card biome-pill-btn" data-biome="coastal" data-name="Coastal" data-icon="🏝️">
+                  <span class="option-card-icon">🏝️</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Coastal</span>
+                    <span class="option-card-desc">Tropical archipelago &amp; ocean waters</span>
+                  </div>
+                </button>
+                <button class="option-card biome-pill-btn" data-biome="plains" data-name="Plains" data-icon="🌾">
+                  <span class="option-card-icon">🌾</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Plains</span>
+                    <span class="option-card-desc">Expansive fertile flatlands with pond</span>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            <!-- Section 3: Map Patch Size -->
+            <div class="options-drawer-section">
+              <div class="options-drawer-title">📐 MAP PATCH SIZE</div>
+              <div class="options-drawer-grid">
+                <button class="option-card size-pill-btn" data-size="48" data-name="Small (48×48)" data-short-name="Small" data-icon="▫️">
+                  <span class="option-card-icon">▫️</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Small Patch (48×48)</span>
+                    <span class="option-card-desc">2,304 tiles • Cozy town &amp; ultra-fast FPS</span>
+                  </div>
+                </button>
+                <button class="option-card size-pill-btn active" data-size="64" data-name="Medium (64×64)" data-short-name="Medium" data-icon="◻️">
+                  <span class="option-card-icon">◻️</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Medium Patch (64×64)</span>
+                    <span class="option-card-desc">4,096 tiles • Standard metropolis [Default]</span>
+                  </div>
+                </button>
+                <button class="option-card size-pill-btn" data-size="96" data-name="Large (96×96)" data-short-name="Large" data-icon="🏬">
+                  <span class="option-card-icon">🏬</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Large Patch (96×96)</span>
+                    <span class="option-card-desc">9,216 tiles • Regional sprawl &amp; high density</span>
+                  </div>
+                </button>
+                <button class="option-card size-pill-btn" data-size="128" data-name="Extra Large (128×128)" data-short-name="Extra Large" data-icon="🌐">
+                  <span class="option-card-icon">🌐</span>
+                  <div class="option-card-text">
+                    <span class="option-card-name">Extra Large Patch (128×128)</span>
+                    <span class="option-card-desc">16,384 tiles • Massive megacity for millions</span>
+                  </div>
+                </button>
+              </div>
+            </div>
           </div>
         </div>
       </div>
